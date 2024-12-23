@@ -1,0 +1,11 @@
+{
+	"id": "browser-favorites",
+	"name": "Browser Favorites",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Manage and organize browser favorites within Obsidian",
+	"author": "",
+	"authorUrl": "",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}
