@@ -1,0 +1,46 @@
+.browser-favorites-header {
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.browser-favorites-instructions {
+    background-color: var(--background-secondary);
+    padding: 10px;
+    border-radius: 5px;
+    margin-bottom: 15px;
+}
+
+.browser-favorites-instructions p {
+    margin: 5px 0;
+    font-size: 0.9em;
+}
+
+.browser-favorites-file-input {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin: 20px 0;
+    padding: 20px;
+    border: 2px dashed var(--background-modifier-border);
+    border-radius: 5px;
+}
+
+.browser-favorites-file-button {
+    padding: 10px 20px;
+    border-radius: 5px;
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    cursor: pointer;
+}
+
+.browser-favorites-file-button:hover {
+    background-color: var(--interactive-accent-hover);
+}
+
+.browser-favorites-filename {
+    font-size: 0.9em;
+    color: var(--text-muted);
+    word-break: break-all;
+    text-align: center;
+}
