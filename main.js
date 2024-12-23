@@ -251,27 +251,42 @@ class BrowserFavoritesPlugin extends obsidian.Plugin {
       }
   
       return { category, subcategory };
-  }
+    }
   
     extractTags(title, url) {
         const tags = new Set();
-        
-        try {
-            const urlParts = new URL(url).hostname.split('.');
-            tags.add(urlParts[urlParts.length - 2].toLowerCase());
-        } catch (e) {
-            console.error('Error parsing URL:', e);
-        }
-        
-        const commonKeywords = ['tutorial', 'guide', 'review', 'documentation', 'api', 'tool'];
-        commonKeywords.forEach(keyword => {
-            if (title.toLowerCase().includes(keyword)) {
-                tags.add('#'+ keyword);
+
+        // Extract domain name as a tag
+        if (url) {
+            try {
+                const urlParts = new URL(url).hostname.split('.');
+                if (urlParts.length > 1) {
+                    tags.add(`#${urlParts[urlParts.length - 2].toLowerCase()}`);
+                }
+            } catch (e) {
+                console.error('Error parsing URL:', e);
             }
-        });
-        
+        }
+
+        // List of common keywords to extract as tags
+        const commonKeywords = [
+            'tutorial', 'guide', 'review', 'documentation', 'api', 'tool', 
+            'news', 'update', 'tips', 'tricks', 'how-to', 'reference', 
+            'blog', 'opinion', 'article', 'resource', 'project', 'code'
+        ];
+
+        // Add matching keywords from the title
+        if (title) {
+            commonKeywords.forEach(keyword => {
+                if (title.toLowerCase().includes(keyword)) {
+                    tags.add(`#${keyword}`);
+                }
+            });
+        }
+
         return Array.from(tags);
     }
+
 
     async importBookmarks(htmlContent) {
         try {
