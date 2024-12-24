@@ -1,1 +1,6 @@
-/* Add your styles here */
+.browser-favorites-version-info {
+    margin-top: 2em;
+    color: var(--text-muted);
+    font-size: 0.8em;
+    text-align: right;
+}
