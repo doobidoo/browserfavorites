@@ -1,7 +1,7 @@
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, ButtonComponent, normalizePath } from 'obsidian';
 import * as path from 'path';
 
-const PLUGIN_VERSION = '2.0.0';
+const PLUGIN_VERSION = '2.2.0';
 
 const BOOKMARK_TABLE_HEADERS = {
     columns: [
@@ -196,6 +196,7 @@ export default class BrowserFavoritesPlugin extends Plugin {
     async saveSettings() {
         await this.saveData(this.settings);
     }
+
     async checkBookmarksAccessibility() {
         if (!this.settings.checkAccessibility) return;
         
@@ -203,6 +204,53 @@ export default class BrowserFavoritesPlugin extends Plugin {
         const files = this.app.vault.getFiles().filter(file => 
             file.path.startsWith(outputFolderPath) && file.extension === 'md'
         );
+    
+        // Zähle zuerst alle zu prüfenden Bookmarks
+        let totalBookmarks = 0;
+        for (const file of files) {
+            const content = await this.app.vault.read(file);
+            const bookmarkLines = content.split('\n').filter(line => 
+                line.startsWith('|') && 
+                !line.startsWith('| Title') && 
+                !line.startsWith('|--') &&
+                line.includes('[🔗]')
+            );
+            totalBookmarks += bookmarkLines.length;
+        }
+    
+        // Wenn keine Bookmarks gefunden wurden
+        if (totalBookmarks === 0) {
+            new Notice('No bookmarks found to check!');
+            return;
+        }
+    
+        // Frage den Benutzer, ob alle oder nur ausgewählte Dateien geprüft werden sollen
+        const shouldCheckAll = await new Promise(resolve => {
+            const notice = new Notice(
+                `Found ${totalBookmarks} bookmarks in ${files.length} files.\nCheck all?`, 
+                0
+            );
+            notice.noticeEl.createEl('button', {text: 'Check All'})
+                .onclick = () => {
+                    notice.hide();
+                    resolve(true);
+                };
+            notice.noticeEl.createEl('button', {text: 'Select Files'})
+                .onclick = () => {
+                    notice.hide();
+                    resolve(false);
+                };
+        });
+    
+        // Wenn nicht alle geprüft werden sollen, lass den Benutzer Dateien auswählen
+        let filesToCheck = files;
+        if (!shouldCheckAll) {
+            filesToCheck = await this.selectFilesToCheck(files);
+            if (filesToCheck.length === 0) {
+                new Notice('No files selected for checking.');
+                return;
+            }
+        }
     
         let checkedCount = 0;
         const delay = 1000;
@@ -212,34 +260,20 @@ export default class BrowserFavoritesPlugin extends Plugin {
             errors: [] as { url: string; error: string }[]
         };
     
-        // Hilfsfunktion zum Extrahieren von Meta-Informationen
-        async function fetchMetaInfo(url: string) {
-            try {
-                const response = await fetch(url);
-                const text = await response.text();
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(text, 'text/html');
-                
-                return {
-                    description: doc.querySelector('meta[name="description"]')?.getAttribute('content') || 
-                                doc.querySelector('meta[property="og:description"]')?.getAttribute('content') || '',
-                    tags: Array.from(doc.querySelectorAll('meta[name="keywords"]'))
-                        .map(el => el.getAttribute('content')?.split(',') || [])
-                        .flat()
-                        .map(tag => tag.trim())
-                        .filter(tag => tag)
-                        .map(tag => tag.startsWith('#') ? tag : `#${tag}`),
-                    title: doc.querySelector('title')?.textContent || ''
-                };
-            } catch (error) {
-                console.error('Error fetching meta info:', error);
-                return { description: '', tags: [], title: '' };
-            }
-        }
+        // Fortschrittsbalken initialisieren
+        const progressNotice = new Notice('', 0);
+        const updateProgress = (file: TFile, current: number, total: number) => {
+            const percent = Math.round((current / total) * 100);
+            const fileName = file.basename;
+            progressNotice.setMessage(
+                `Checking: ${fileName}\n` +
+                `Progress: ${current}/${total} (${percent}%)\n` +
+                `✅ ${results.accessible} | ❌ ${results.inaccessible}`
+            );
+        };
     
-        for (const file of files) {
+        for (const file of filesToCheck) {
             const content = await this.app.vault.read(file);
-            let newContent = content;
             const lines = content.split('\n');
             let isInTable = false;
             let modifiedLines = [...lines];
@@ -249,7 +283,6 @@ export default class BrowserFavoritesPlugin extends Plugin {
                 
                 if (line.startsWith('| Title |')) {
                     isInTable = true;
-                    // Update header if needed
                     modifiedLines[i] = BOOKMARK_TABLE_HEADERS.header;
                     i++;
                     continue;
@@ -260,46 +293,110 @@ export default class BrowserFavoritesPlugin extends Plugin {
                     if (urlMatch) {
                         const url = urlMatch[1];
                         try {
-                            // Fetch meta info and accessibility check
-                            const metaInfo = await fetchMetaInfo(url);
+                            const metaInfo = await this.fetchMetaInfo(url);
                             results.accessible++;
     
                             const cells = line.split('|').map(cell => cell.trim());
                             const existingTags = cells[3] ? cells[3].split(' ') : [];
                             const combinedTags = [...new Set([...existingTags, ...metaInfo.tags])].join(' ');
                             
-                            // Combine existing and new description
                             const existingDesc = cells[5] || '';
                             const newDesc = metaInfo.description;
                             const finalDesc = existingDesc || newDesc;
     
-                            const newLine = `| ${cells[1]} | ${cells[2]} | ${combinedTags} | ${cells[4]} | ${finalDesc} | ${new Date().toISOString().split('T')[0]} | ✅ |`;
-                            modifiedLines[i] = newLine;
+                            modifiedLines[i] = `| ${cells[1]} | ${cells[2]} | ${combinedTags} | ${cells[4]} | ${finalDesc} | ${new Date().toISOString().split('T')[0]} | ✅ |`;
                         } catch (error) {
                             results.inaccessible++;
                             results.errors.push({ url, error: error.message });
-                            const cells = line.split('|').map((cell: string) => cell.trim())
-                            const newLine = `| ${cells[1]} | ${cells[2]} | ${cells[3]} | ${cells[4]} | ${cells[5]} | ${new Date().toISOString().split('T')[0]} | ❌ |`;
-                            modifiedLines[i] = newLine;
+                            const cells = line.split('|').map(cell => cell.trim());
+                            modifiedLines[i] = `| ${cells[1]} | ${cells[2]} | ${cells[3]} | ${cells[4]} | ${cells[5]} | ${new Date().toISOString().split('T')[0]} | ❌ |`;
                         }
                         checkedCount++;
-                        new Notice(`Checking bookmarks: ${checkedCount}`);
+                        updateProgress(file, checkedCount, totalBookmarks);
                         await new Promise(resolve => setTimeout(resolve, delay));
                     }
                 }
             }
     
-            // Update file content
             const updatedContent = modifiedLines.join('\n');
             if (updatedContent !== content) {
                 await this.app.vault.modify(file, updatedContent);
             }
         }
     
-        new Notice(`Accessibility check complete!\nAccessible: ${results.accessible}\nInaccessible: ${results.inaccessible}`);
+        progressNotice.hide();
+        new Notice(
+            `Accessibility check complete!\n` +
+            `✅ Accessible: ${results.accessible}\n` +
+            `❌ Inaccessible: ${results.inaccessible}`
+        );
         console.log('Bookmark accessibility check results:', results);
         
         return results;
+    }
+    
+    // Neue Hilfsmethode zur Dateiauswahl
+    private async selectFilesToCheck(files: TFile[]): Promise<TFile[]> {
+        return new Promise(resolve => {
+            const modal = new Modal(this.app);
+            modal.titleEl.setText('Select files to check');
+            
+            const selectedFiles = new Set<TFile>();
+            
+            files.forEach(file => {
+                const setting = new Setting(modal.contentEl)
+                    .addToggle(toggle => toggle
+                        .onChange(value => {
+                            if (value) {
+                                selectedFiles.add(file);
+                            } else {
+                                selectedFiles.delete(file);
+                            }
+                        }))
+                    .setName(file.basename);
+            });
+    
+            new Setting(modal.contentEl)
+                .addButton(btn => btn
+                    .setButtonText('Confirm')
+                    .onClick(() => {
+                        modal.close();
+                        resolve(Array.from(selectedFiles));
+                    }))
+                .addButton(btn => btn
+                    .setButtonText('Cancel')
+                    .onClick(() => {
+                        modal.close();
+                        resolve([]);
+                    }));
+    
+            modal.open();
+        });
+    }
+    
+    // Ausgelagerte fetchMetaInfo Methode
+    private async fetchMetaInfo(url: string) {
+        try {
+            const response = await fetch(url);
+            const text = await response.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(text, 'text/html');
+            
+            return {
+                description: doc.querySelector('meta[name="description"]')?.getAttribute('content') || 
+                            doc.querySelector('meta[property="og:description"]')?.getAttribute('content') || '',
+                tags: Array.from(doc.querySelectorAll('meta[name="keywords"]'))
+                    .map(el => el.getAttribute('content')?.split(',') || [])
+                    .flat()
+                    .map(tag => tag.trim())
+                    .filter(tag => tag)
+                    .map(tag => tag.startsWith('#') ? tag : `#${tag}`),
+                title: doc.querySelector('title')?.textContent || ''
+            };
+        } catch (error) {
+            console.error('Error fetching meta info:', error);
+            throw error;
+        }
     }
 	
     categorize(title: string, href: string): CategoryResult {
@@ -450,9 +547,205 @@ export default class BrowserFavoritesPlugin extends Plugin {
         return Array.from(tags);
     }
 
-    // Neue Hilfsmethode zum Deduplizieren von Bookmarks
-    private deduplicateBookmarks(bookmarks: Bookmark[]): Bookmark[] {
-        // Gruppiere Bookmarks nach URL
+    
+    // Neue Hilfsmethode zum Abbrechen von Operationen
+    private abortController: AbortController | null = null;
+
+    async cleanupDuplicates() {
+        // Initialisiere neuen AbortController
+        this.abortController = new AbortController();
+        
+        const outputFolderPath = normalizePath(this.settings.outputFolderPath);
+        const files = this.app.vault.getFiles().filter((file: TFile) =>
+            file.path.startsWith(outputFolderPath) && file.extension === 'md'
+        );
+
+        // Zähle zuerst alle zu prüfenden Bookmarks
+        let totalBookmarks = 0;
+        for (const file of files) {
+            const content = await this.app.vault.read(file);
+            const bookmarkLines = content.split('\n').filter(line => 
+                line.startsWith('|') && 
+                !line.startsWith('| Title') && 
+                !line.startsWith('|--') &&
+                line.includes('[🔗]')
+            );
+            totalBookmarks += bookmarkLines.length;
+        }
+
+        // Wenn keine Bookmarks gefunden wurden
+        if (totalBookmarks === 0) {
+            new Notice('No bookmarks found to deduplicate!');
+            return;
+        }
+
+        // Frage den Benutzer, ob alle oder nur ausgewählte Dateien geprüft werden sollen
+        const shouldCheckAll = await new Promise(resolve => {
+            const notice = new Notice(
+                `Found ${totalBookmarks} bookmarks in ${files.length} files.\nCheck all?`, 
+                0
+            );
+            notice.noticeEl.createEl('button', {text: 'Check All'})
+                .onclick = () => {
+                    notice.hide();
+                    resolve(true);
+                };
+            notice.noticeEl.createEl('button', {text: 'Select Files'})
+                .onclick = () => {
+                    notice.hide();
+                    resolve(false);
+                };
+        });
+
+        // Wenn nicht alle geprüft werden sollen, lass den Benutzer Dateien auswählen
+        let filesToCheck = files;
+        if (!shouldCheckAll) {
+            filesToCheck = await this.selectFilesToCheck(files);
+            if (filesToCheck.length === 0) {
+                new Notice('No files selected for deduplication.');
+                return;
+            }
+        }
+
+        // Fortschrittsanzeige initialisieren
+        const progressNotice = new Notice('', 0);
+        let processedBookmarks = 0;
+        let duplicatesFound = 0;
+
+        const updateProgress = (file: TFile, current: number, total: number, duplicates: number) => {
+            const percent = Math.round((current / total) * 100);
+            progressNotice.setMessage(
+                `Processing: ${file.basename}\n` +
+                `Progress: ${current}/${total} (${percent}%)\n` +
+                `Duplicates found: ${duplicates}`
+            );
+        };
+
+        // Abbruch-Button hinzufügen
+        const abortNotice = new Notice('', 0);
+        abortNotice.noticeEl.createEl('button', {
+            text: 'Cancel Deduplication',
+            cls: 'mod-warning'
+        }).onclick = () => {
+            if (this.abortController) {
+                this.abortController.abort();
+                new Notice('Deduplication cancelled!');
+            }
+        };
+
+        try {
+            for (const file of filesToCheck) {
+                if (this.abortController?.signal.aborted) {
+                    break;
+                }
+
+                const content = await this.app.vault.read(file);
+                let newContent: string[] = [];
+                let currentSection = '';
+                let bookmarksBySection = new Map<string, Bookmark[]>();
+                let isInTable = false;
+                
+                // Erste Durchgang: Sammle alle Bookmarks nach Abschnitten
+                const lines = content.split('\n');
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    
+                    if (line.startsWith('## ')) {
+                        currentSection = line.substring(3).trim();
+                        bookmarksBySection.set(currentSection, []);
+                        continue;
+                    }
+                    
+                    if (line.startsWith('| Title |')) {
+                        isInTable = true;
+                        continue;
+                    }
+                    
+                    if (isInTable && line.startsWith('|') && !line.startsWith('|--')) {
+                        const cells = line.split('|').map(cell => cell.trim());
+                        const urlMatch = cells[2].match(/\[🔗\]\((https?:\/\/[^\)]+)\)/);
+                        
+                        if (urlMatch && currentSection) {
+                            const bookmark: Bookmark = {
+                                title: cells[1],
+                                url: urlMatch[1],
+                                tags: cells[3] ? cells[3].split(' ') : [],
+                                addDate: cells[4],
+                                lastModified: cells[6] || '',
+                                description: cells[5] || ''
+                            };
+                            bookmarksBySection.get(currentSection)?.push(bookmark);
+                            processedBookmarks++;
+                            updateProgress(file, processedBookmarks, totalBookmarks, duplicatesFound);
+                        }
+                    }
+                }
+                
+                // Zweiter Durchgang: Erstelle neue Datei mit deduplizierten Bookmarks
+                let headerSection = '';
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    
+                    if (line.startsWith('# ')) {
+                        headerSection = line;
+                        newContent.push(line);
+                        continue;
+                    }
+                    
+                    if (line.startsWith('## ')) {
+                        currentSection = line.substring(3).trim();
+                        newContent.push('');
+                        newContent.push(line);
+                        newContent.push('');
+                        
+                        // Füge Tabellen-Header hinzu
+                        newContent.push(BOOKMARK_TABLE_HEADERS.header);
+                        
+                        // Füge deduplizierte Bookmarks hinzu
+                        const sectionBookmarks = bookmarksBySection.get(currentSection) || [];
+                        const deduplicatedBookmarks = this.deduplicateBookmarkArray(sectionBookmarks);
+                        duplicatesFound += sectionBookmarks.length - deduplicatedBookmarks.length;
+                        
+                        deduplicatedBookmarks.forEach(bookmark => {
+                            newContent.push(this.formatBookmarkLine(bookmark));
+                        });
+                        
+                        // Überspringe die alte Tabelle
+                        while (i < lines.length && (lines[i].startsWith('|') || lines[i].trim() === '')) {
+                            i++;
+                        }
+                        i--;
+                    }
+                }
+                
+                // Aktualisiere die Datei
+                if (this.abortController?.signal.aborted) {
+                    break;
+                }
+                await this.app.vault.modify(file, newContent.join('\n'));
+            }
+
+            progressNotice.hide();
+            abortNotice.hide();
+
+            if (!this.abortController?.signal.aborted) {
+                new Notice(
+                    `Deduplication complete!\n` +
+                    `Processed: ${processedBookmarks} bookmarks\n` +
+                    `Removed: ${duplicatesFound} duplicates`
+                );
+            }
+        } catch (error) {
+            console.error('Error during deduplication:', error);
+            new Notice('Error during deduplication. Check console for details.');
+        } finally {
+            this.abortController = null;
+        }
+    }
+
+    
+    // Hilfsmethode zur Deduplizierung eines Bookmark-Arrays
+    private deduplicateBookmarkArray(bookmarks: Bookmark[]): Bookmark[] {
         const bookmarkMap = new Map<string, Bookmark[]>();
         
         bookmarks.forEach(bookmark => {
@@ -460,10 +753,8 @@ export default class BrowserFavoritesPlugin extends Plugin {
             existingGroup.push(bookmark);
             bookmarkMap.set(bookmark.url, existingGroup);
         });
-
-        // Für jede URL den neuesten Eintrag behalten
-        const deduplicatedBookmarks: Bookmark[] = [];
-        bookmarkMap.forEach(group => {
+    
+        return Array.from(bookmarkMap.values()).map(group => {
             const newestBookmark = group.reduce((newest, current) => {
                 const newestDate = newest.addDate ? new Date(parseInt(newest.addDate) * 1000) : new Date(0);
                 const currentDate = current.addDate ? new Date(parseInt(current.addDate) * 1000) : new Date(0);
@@ -477,10 +768,8 @@ export default class BrowserFavoritesPlugin extends Plugin {
             });
             newestBookmark.tags = Array.from(allTags);
             
-            deduplicatedBookmarks.push(newestBookmark);
+            return newestBookmark;
         });
-
-        return deduplicatedBookmarks;
     }
 
     // Update der Import-Methode
@@ -490,7 +779,7 @@ export default class BrowserFavoritesPlugin extends Plugin {
         const bookmarks = this.parseBookmarks(doc.body);
         
         // Dedupliziere Bookmarks vor dem Import
-        const deduplicatedBookmarks = this.deduplicateBookmarks(bookmarks);
+        const deduplicatedBookmarks = this.deduplicateBookmarkArray(bookmarks);
         
         // Gruppiere nach Kategorien
         const bookmarksByCategory = new Map<string, Map<string, Bookmark[]>>();
@@ -527,97 +816,6 @@ export default class BrowserFavoritesPlugin extends Plugin {
         }
 
         new Notice(`Import completed! ${deduplicatedBookmarks.length} bookmarks processed.`);
-    }
-
-    // Methode zum Bereinigen existierender Dateien
-    async cleanupDuplicates() {
-        const outputFolderPath = normalizePath(this.settings.outputFolderPath);
-        const files = this.app.vault.getFiles().filter((file: TFile) =>
-            file.path.startsWith(outputFolderPath) && file.extension === 'md'
-        );
-    
-        for (const file of files) {
-            const content = await this.app.vault.read(file);
-            const lines = content.split('\n');
-            let newContent: string[] = [];
-            let currentSection = '';
-            let bookmarksBySection = new Map<string, Bookmark[]>();
-            let isInTable = false;
-            
-            // Erste Durchgang: Sammle alle Bookmarks nach Abschnitten
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                
-                if (line.startsWith('## ')) {
-                    currentSection = line.substring(3).trim();
-                    bookmarksBySection.set(currentSection, []);
-                    continue;
-                }
-                
-                if (line.startsWith('| Title |')) {
-                    isInTable = true;
-                    continue;
-                }
-                
-                if (isInTable && line.startsWith('|') && !line.startsWith('|--')) {
-                    const cells = line.split('|').map(cell => cell.trim());
-                    const urlMatch = cells[2].match(/\[🔗\]\((https?:\/\/[^\)]+)\)/);
-                    
-                    if (urlMatch && currentSection) {
-                        const bookmark: Bookmark = {
-                            title: cells[1],
-                            url: urlMatch[1],
-                            tags: cells[3] ? cells[3].split(' ') : [],
-                            addDate: cells[4],
-                            lastModified: cells[6] || '',
-                            description: cells[5] || ''
-                        };
-                        bookmarksBySection.get(currentSection)?.push(bookmark);
-                    }
-                }
-            }
-            
-            // Zweiter Durchgang: Erstelle neue Datei mit deduplizierten Bookmarks
-            let headerSection = '';
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                
-                if (line.startsWith('# ')) {
-                    headerSection = line;
-                    newContent.push(line);
-                    continue;
-                }
-                
-                if (line.startsWith('## ')) {
-                    currentSection = line.substring(3).trim();
-                    newContent.push('');
-                    newContent.push(line);
-                    newContent.push('');
-                    
-                    // Füge Tabellen-Header hinzu
-                    newContent.push(BOOKMARK_TABLE_HEADERS.header);
-                    
-                    // Füge deduplizierte Bookmarks hinzu
-                    const sectionBookmarks = bookmarksBySection.get(currentSection) || [];
-                    const deduplicatedBookmarks = this.deduplicateBookmarks(sectionBookmarks);
-                    
-                    deduplicatedBookmarks.forEach(bookmark => {
-                        newContent.push(this.formatBookmarkLine(bookmark));
-                    });
-                    
-                    // Überspringe die alte Tabelle
-                    while (i < lines.length && (lines[i].startsWith('|') || lines[i].trim() === '')) {
-                        i++;
-                    }
-                    i--;
-                }
-            }
-            
-            // Aktualisiere die Datei
-            await this.app.vault.modify(file, newContent.join('\n'));
-        }
-        
-        new Notice('Duplicate cleanup completed!');
     }
 
     private async readExistingBookmarks(category: string, subcategory: string): Promise<Set<string>> {
@@ -769,6 +967,7 @@ export default class BrowserFavoritesPlugin extends Plugin {
         return bookmarks;
     }
 }
+
 class BrowserFavoritesSettingTab extends PluginSettingTab {
     plugin: BrowserFavoritesPlugin;
     containerEl!: HTMLElement;
@@ -783,9 +982,6 @@ class BrowserFavoritesSettingTab extends PluginSettingTab {
         containerEl.empty();
         containerEl.createEl('h2', {text: 'Browser Favorites Settings'});
         
-        // Überschrift mit Version
-        containerEl.createEl('h2', {text: `Browser Favorites Settings (v${PLUGIN_VERSION})`});
-
         new Setting(containerEl)
             .setName('Output folder')
             .setDesc('Where to store the imported bookmarks')

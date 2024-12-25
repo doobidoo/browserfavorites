@@ -97,6 +97,15 @@ If you encounter any issues or have feature requests, please:
 - Custom output folder support
 - Browser bookmark HTML import support
 
+## Version Control
+- npm version patch  # For 1.0.0 -> 1.0.1
+- npm version minor  # For 1.0.0 -> 1.1.0
+- npm version major  # For 1.0.0 -> 2.0.0
+or edit package.json and
+```
+npm run version-sync
+npm run build
+```
 ## Credits
 
 Developed by [Your Name]

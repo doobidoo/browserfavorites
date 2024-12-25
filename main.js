@@ -39,7 +39,7 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var path = __toESM(require("path"));
-var PLUGIN_VERSION = "1.0.10";
+var PLUGIN_VERSION = "2.2.0";
 var BOOKMARK_TABLE_HEADERS = {
   columns: [
     "Title",
@@ -142,6 +142,11 @@ var FileUploadModal = class extends import_obsidian.Modal {
   }
 };
 var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
+  constructor() {
+    super(...arguments);
+    // Neue Hilfsmethode zum Abbrechen von Operationen
+    this.abortController = null;
+  }
   async onload() {
     await this.loadSettings();
     this.addRibbonIcon("browser", `Browser Favorites v${PLUGIN_VERSION}`, () => {
@@ -191,6 +196,41 @@ var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
     const files = this.app.vault.getFiles().filter(
       (file) => file.path.startsWith(outputFolderPath) && file.extension === "md"
     );
+    let totalBookmarks = 0;
+    for (const file of files) {
+      const content = await this.app.vault.read(file);
+      const bookmarkLines = content.split("\n").filter(
+        (line) => line.startsWith("|") && !line.startsWith("| Title") && !line.startsWith("|--") && line.includes("[\u{1F517}]")
+      );
+      totalBookmarks += bookmarkLines.length;
+    }
+    if (totalBookmarks === 0) {
+      new import_obsidian.Notice("No bookmarks found to check!");
+      return;
+    }
+    const shouldCheckAll = await new Promise((resolve) => {
+      const notice = new import_obsidian.Notice(
+        `Found ${totalBookmarks} bookmarks in ${files.length} files.
+Check all?`,
+        0
+      );
+      notice.noticeEl.createEl("button", { text: "Check All" }).onclick = () => {
+        notice.hide();
+        resolve(true);
+      };
+      notice.noticeEl.createEl("button", { text: "Select Files" }).onclick = () => {
+        notice.hide();
+        resolve(false);
+      };
+    });
+    let filesToCheck = files;
+    if (!shouldCheckAll) {
+      filesToCheck = await this.selectFilesToCheck(files);
+      if (filesToCheck.length === 0) {
+        new import_obsidian.Notice("No files selected for checking.");
+        return;
+      }
+    }
     let checkedCount = 0;
     const delay = 1e3;
     const results = {
@@ -198,29 +238,18 @@ var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
       inaccessible: 0,
       errors: []
     };
-    async function fetchMetaInfo(url) {
-      var _a, _b, _c;
-      try {
-        const response = await fetch(url);
-        const text = await response.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(text, "text/html");
-        return {
-          description: ((_a = doc.querySelector('meta[name="description"]')) == null ? void 0 : _a.getAttribute("content")) || ((_b = doc.querySelector('meta[property="og:description"]')) == null ? void 0 : _b.getAttribute("content")) || "",
-          tags: Array.from(doc.querySelectorAll('meta[name="keywords"]')).map((el) => {
-            var _a2;
-            return ((_a2 = el.getAttribute("content")) == null ? void 0 : _a2.split(",")) || [];
-          }).flat().map((tag) => tag.trim()).filter((tag) => tag).map((tag) => tag.startsWith("#") ? tag : `#${tag}`),
-          title: ((_c = doc.querySelector("title")) == null ? void 0 : _c.textContent) || ""
-        };
-      } catch (error) {
-        console.error("Error fetching meta info:", error);
-        return { description: "", tags: [], title: "" };
-      }
-    }
-    for (const file of files) {
+    const progressNotice = new import_obsidian.Notice("", 0);
+    const updateProgress = (file, current, total) => {
+      const percent = Math.round(current / total * 100);
+      const fileName = file.basename;
+      progressNotice.setMessage(
+        `Checking: ${fileName}
+Progress: ${current}/${total} (${percent}%)
+\u2705 ${results.accessible} | \u274C ${results.inaccessible}`
+      );
+    };
+    for (const file of filesToCheck) {
       const content = await this.app.vault.read(file);
-      let newContent = content;
       const lines = content.split("\n");
       let isInTable = false;
       let modifiedLines = [...lines];
@@ -237,7 +266,7 @@ var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
           if (urlMatch) {
             const url = urlMatch[1];
             try {
-              const metaInfo = await fetchMetaInfo(url);
+              const metaInfo = await this.fetchMetaInfo(url);
               results.accessible++;
               const cells = line.split("|").map((cell) => cell.trim());
               const existingTags = cells[3] ? cells[3].split(" ") : [];
@@ -245,17 +274,15 @@ var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
               const existingDesc = cells[5] || "";
               const newDesc = metaInfo.description;
               const finalDesc = existingDesc || newDesc;
-              const newLine = `| ${cells[1]} | ${cells[2]} | ${combinedTags} | ${cells[4]} | ${finalDesc} | ${new Date().toISOString().split("T")[0]} | \u2705 |`;
-              modifiedLines[i] = newLine;
+              modifiedLines[i] = `| ${cells[1]} | ${cells[2]} | ${combinedTags} | ${cells[4]} | ${finalDesc} | ${new Date().toISOString().split("T")[0]} | \u2705 |`;
             } catch (error) {
               results.inaccessible++;
               results.errors.push({ url, error: error.message });
               const cells = line.split("|").map((cell) => cell.trim());
-              const newLine = `| ${cells[1]} | ${cells[2]} | ${cells[3]} | ${cells[4]} | ${cells[5]} | ${new Date().toISOString().split("T")[0]} | \u274C |`;
-              modifiedLines[i] = newLine;
+              modifiedLines[i] = `| ${cells[1]} | ${cells[2]} | ${cells[3]} | ${cells[4]} | ${cells[5]} | ${new Date().toISOString().split("T")[0]} | \u274C |`;
             }
             checkedCount++;
-            new import_obsidian.Notice(`Checking bookmarks: ${checkedCount}`);
+            updateProgress(file, checkedCount, totalBookmarks);
             await new Promise((resolve) => setTimeout(resolve, delay));
           }
         }
@@ -265,11 +292,60 @@ var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
         await this.app.vault.modify(file, updatedContent);
       }
     }
-    new import_obsidian.Notice(`Accessibility check complete!
-Accessible: ${results.accessible}
-Inaccessible: ${results.inaccessible}`);
+    progressNotice.hide();
+    new import_obsidian.Notice(
+      `Accessibility check complete!
+\u2705 Accessible: ${results.accessible}
+\u274C Inaccessible: ${results.inaccessible}`
+    );
     console.log("Bookmark accessibility check results:", results);
     return results;
+  }
+  // Neue Hilfsmethode zur Dateiauswahl
+  async selectFilesToCheck(files) {
+    return new Promise((resolve) => {
+      const modal = new import_obsidian.Modal(this.app);
+      modal.titleEl.setText("Select files to check");
+      const selectedFiles = /* @__PURE__ */ new Set();
+      files.forEach((file) => {
+        const setting = new import_obsidian.Setting(modal.contentEl).addToggle((toggle) => toggle.onChange((value) => {
+          if (value) {
+            selectedFiles.add(file);
+          } else {
+            selectedFiles.delete(file);
+          }
+        })).setName(file.basename);
+      });
+      new import_obsidian.Setting(modal.contentEl).addButton((btn) => btn.setButtonText("Confirm").onClick(() => {
+        modal.close();
+        resolve(Array.from(selectedFiles));
+      })).addButton((btn) => btn.setButtonText("Cancel").onClick(() => {
+        modal.close();
+        resolve([]);
+      }));
+      modal.open();
+    });
+  }
+  // Ausgelagerte fetchMetaInfo Methode
+  async fetchMetaInfo(url) {
+    var _a, _b, _c;
+    try {
+      const response = await fetch(url);
+      const text = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(text, "text/html");
+      return {
+        description: ((_a = doc.querySelector('meta[name="description"]')) == null ? void 0 : _a.getAttribute("content")) || ((_b = doc.querySelector('meta[property="og:description"]')) == null ? void 0 : _b.getAttribute("content")) || "",
+        tags: Array.from(doc.querySelectorAll('meta[name="keywords"]')).map((el) => {
+          var _a2;
+          return ((_a2 = el.getAttribute("content")) == null ? void 0 : _a2.split(",")) || [];
+        }).flat().map((tag) => tag.trim()).filter((tag) => tag).map((tag) => tag.startsWith("#") ? tag : `#${tag}`),
+        title: ((_c = doc.querySelector("title")) == null ? void 0 : _c.textContent) || ""
+      };
+    } catch (error) {
+      console.error("Error fetching meta info:", error);
+      throw error;
+    }
   }
   categorize(title, href) {
     const lowerTitle = title.toLowerCase();
@@ -410,16 +486,165 @@ Inaccessible: ${results.inaccessible}`);
     }
     return Array.from(tags);
   }
-  // Neue Hilfsmethode zum Deduplizieren von Bookmarks
-  deduplicateBookmarks(bookmarks) {
+  async cleanupDuplicates() {
+    var _a, _b, _c, _d;
+    this.abortController = new AbortController();
+    const outputFolderPath = (0, import_obsidian.normalizePath)(this.settings.outputFolderPath);
+    const files = this.app.vault.getFiles().filter(
+      (file) => file.path.startsWith(outputFolderPath) && file.extension === "md"
+    );
+    let totalBookmarks = 0;
+    for (const file of files) {
+      const content = await this.app.vault.read(file);
+      const bookmarkLines = content.split("\n").filter(
+        (line) => line.startsWith("|") && !line.startsWith("| Title") && !line.startsWith("|--") && line.includes("[\u{1F517}]")
+      );
+      totalBookmarks += bookmarkLines.length;
+    }
+    if (totalBookmarks === 0) {
+      new import_obsidian.Notice("No bookmarks found to deduplicate!");
+      return;
+    }
+    const shouldCheckAll = await new Promise((resolve) => {
+      const notice = new import_obsidian.Notice(
+        `Found ${totalBookmarks} bookmarks in ${files.length} files.
+Check all?`,
+        0
+      );
+      notice.noticeEl.createEl("button", { text: "Check All" }).onclick = () => {
+        notice.hide();
+        resolve(true);
+      };
+      notice.noticeEl.createEl("button", { text: "Select Files" }).onclick = () => {
+        notice.hide();
+        resolve(false);
+      };
+    });
+    let filesToCheck = files;
+    if (!shouldCheckAll) {
+      filesToCheck = await this.selectFilesToCheck(files);
+      if (filesToCheck.length === 0) {
+        new import_obsidian.Notice("No files selected for deduplication.");
+        return;
+      }
+    }
+    const progressNotice = new import_obsidian.Notice("", 0);
+    let processedBookmarks = 0;
+    let duplicatesFound = 0;
+    const updateProgress = (file, current, total, duplicates) => {
+      const percent = Math.round(current / total * 100);
+      progressNotice.setMessage(
+        `Processing: ${file.basename}
+Progress: ${current}/${total} (${percent}%)
+Duplicates found: ${duplicates}`
+      );
+    };
+    const abortNotice = new import_obsidian.Notice("", 0);
+    abortNotice.noticeEl.createEl("button", {
+      text: "Cancel Deduplication",
+      cls: "mod-warning"
+    }).onclick = () => {
+      if (this.abortController) {
+        this.abortController.abort();
+        new import_obsidian.Notice("Deduplication cancelled!");
+      }
+    };
+    try {
+      for (const file of filesToCheck) {
+        if ((_a = this.abortController) == null ? void 0 : _a.signal.aborted) {
+          break;
+        }
+        const content = await this.app.vault.read(file);
+        let newContent = [];
+        let currentSection = "";
+        let bookmarksBySection = /* @__PURE__ */ new Map();
+        let isInTable = false;
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          if (line.startsWith("## ")) {
+            currentSection = line.substring(3).trim();
+            bookmarksBySection.set(currentSection, []);
+            continue;
+          }
+          if (line.startsWith("| Title |")) {
+            isInTable = true;
+            continue;
+          }
+          if (isInTable && line.startsWith("|") && !line.startsWith("|--")) {
+            const cells = line.split("|").map((cell) => cell.trim());
+            const urlMatch = cells[2].match(/\[🔗\]\((https?:\/\/[^\)]+)\)/);
+            if (urlMatch && currentSection) {
+              const bookmark = {
+                title: cells[1],
+                url: urlMatch[1],
+                tags: cells[3] ? cells[3].split(" ") : [],
+                addDate: cells[4],
+                lastModified: cells[6] || "",
+                description: cells[5] || ""
+              };
+              (_b = bookmarksBySection.get(currentSection)) == null ? void 0 : _b.push(bookmark);
+              processedBookmarks++;
+              updateProgress(file, processedBookmarks, totalBookmarks, duplicatesFound);
+            }
+          }
+        }
+        let headerSection = "";
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          if (line.startsWith("# ")) {
+            headerSection = line;
+            newContent.push(line);
+            continue;
+          }
+          if (line.startsWith("## ")) {
+            currentSection = line.substring(3).trim();
+            newContent.push("");
+            newContent.push(line);
+            newContent.push("");
+            newContent.push(BOOKMARK_TABLE_HEADERS.header);
+            const sectionBookmarks = bookmarksBySection.get(currentSection) || [];
+            const deduplicatedBookmarks = this.deduplicateBookmarkArray(sectionBookmarks);
+            duplicatesFound += sectionBookmarks.length - deduplicatedBookmarks.length;
+            deduplicatedBookmarks.forEach((bookmark) => {
+              newContent.push(this.formatBookmarkLine(bookmark));
+            });
+            while (i < lines.length && (lines[i].startsWith("|") || lines[i].trim() === "")) {
+              i++;
+            }
+            i--;
+          }
+        }
+        if ((_c = this.abortController) == null ? void 0 : _c.signal.aborted) {
+          break;
+        }
+        await this.app.vault.modify(file, newContent.join("\n"));
+      }
+      progressNotice.hide();
+      abortNotice.hide();
+      if (!((_d = this.abortController) == null ? void 0 : _d.signal.aborted)) {
+        new import_obsidian.Notice(
+          `Deduplication complete!
+Processed: ${processedBookmarks} bookmarks
+Removed: ${duplicatesFound} duplicates`
+        );
+      }
+    } catch (error) {
+      console.error("Error during deduplication:", error);
+      new import_obsidian.Notice("Error during deduplication. Check console for details.");
+    } finally {
+      this.abortController = null;
+    }
+  }
+  // Hilfsmethode zur Deduplizierung eines Bookmark-Arrays
+  deduplicateBookmarkArray(bookmarks) {
     const bookmarkMap = /* @__PURE__ */ new Map();
     bookmarks.forEach((bookmark) => {
       const existingGroup = bookmarkMap.get(bookmark.url) || [];
       existingGroup.push(bookmark);
       bookmarkMap.set(bookmark.url, existingGroup);
     });
-    const deduplicatedBookmarks = [];
-    bookmarkMap.forEach((group) => {
+    return Array.from(bookmarkMap.values()).map((group) => {
       const newestBookmark = group.reduce((newest, current) => {
         const newestDate = newest.addDate ? new Date(parseInt(newest.addDate) * 1e3) : new Date(0);
         const currentDate = current.addDate ? new Date(parseInt(current.addDate) * 1e3) : new Date(0);
@@ -430,16 +655,15 @@ Inaccessible: ${results.inaccessible}`);
         bookmark.tags.forEach((tag) => allTags.add(tag));
       });
       newestBookmark.tags = Array.from(allTags);
-      deduplicatedBookmarks.push(newestBookmark);
+      return newestBookmark;
     });
-    return deduplicatedBookmarks;
   }
   // Update der Import-Methode
   async importBookmarks(htmlContent) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlContent, "text/html");
     const bookmarks = this.parseBookmarks(doc.body);
-    const deduplicatedBookmarks = this.deduplicateBookmarks(bookmarks);
+    const deduplicatedBookmarks = this.deduplicateBookmarkArray(bookmarks);
     const bookmarksByCategory = /* @__PURE__ */ new Map();
     deduplicatedBookmarks.forEach((bookmark) => {
       const category = bookmark.category || "Uncategorized";
@@ -463,76 +687,6 @@ Inaccessible: ${results.inaccessible}`);
       }
     }
     new import_obsidian.Notice(`Import completed! ${deduplicatedBookmarks.length} bookmarks processed.`);
-  }
-  // Methode zum Bereinigen existierender Dateien
-  async cleanupDuplicates() {
-    var _a;
-    const outputFolderPath = (0, import_obsidian.normalizePath)(this.settings.outputFolderPath);
-    const files = this.app.vault.getFiles().filter(
-      (file) => file.path.startsWith(outputFolderPath) && file.extension === "md"
-    );
-    for (const file of files) {
-      const content = await this.app.vault.read(file);
-      const lines = content.split("\n");
-      let newContent = [];
-      let currentSection = "";
-      let bookmarksBySection = /* @__PURE__ */ new Map();
-      let isInTable = false;
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (line.startsWith("## ")) {
-          currentSection = line.substring(3).trim();
-          bookmarksBySection.set(currentSection, []);
-          continue;
-        }
-        if (line.startsWith("| Title |")) {
-          isInTable = true;
-          continue;
-        }
-        if (isInTable && line.startsWith("|") && !line.startsWith("|--")) {
-          const cells = line.split("|").map((cell) => cell.trim());
-          const urlMatch = cells[2].match(/\[🔗\]\((https?:\/\/[^\)]+)\)/);
-          if (urlMatch && currentSection) {
-            const bookmark = {
-              title: cells[1],
-              url: urlMatch[1],
-              tags: cells[3] ? cells[3].split(" ") : [],
-              addDate: cells[4],
-              lastModified: cells[6] || "",
-              description: cells[5] || ""
-            };
-            (_a = bookmarksBySection.get(currentSection)) == null ? void 0 : _a.push(bookmark);
-          }
-        }
-      }
-      let headerSection = "";
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (line.startsWith("# ")) {
-          headerSection = line;
-          newContent.push(line);
-          continue;
-        }
-        if (line.startsWith("## ")) {
-          currentSection = line.substring(3).trim();
-          newContent.push("");
-          newContent.push(line);
-          newContent.push("");
-          newContent.push(BOOKMARK_TABLE_HEADERS.header);
-          const sectionBookmarks = bookmarksBySection.get(currentSection) || [];
-          const deduplicatedBookmarks = this.deduplicateBookmarks(sectionBookmarks);
-          deduplicatedBookmarks.forEach((bookmark) => {
-            newContent.push(this.formatBookmarkLine(bookmark));
-          });
-          while (i < lines.length && (lines[i].startsWith("|") || lines[i].trim() === "")) {
-            i++;
-          }
-          i--;
-        }
-      }
-      await this.app.vault.modify(file, newContent.join("\n"));
-    }
-    new import_obsidian.Notice("Duplicate cleanup completed!");
   }
   async readExistingBookmarks(category, subcategory) {
     const outputFolderPath = (0, import_obsidian.normalizePath)(this.settings.outputFolderPath);
@@ -671,7 +825,6 @@ var BrowserFavoritesSettingTab = class extends import_obsidian.PluginSettingTab 
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Browser Favorites Settings" });
-    containerEl.createEl("h2", { text: `Browser Favorites Settings (v${PLUGIN_VERSION})` });
     new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Where to store the imported bookmarks").addText((text) => text.setPlaceholder("Browser Favorites").setValue(this.plugin.settings.outputFolderPath).onChange(async (value) => {
       this.plugin.settings.outputFolderPath = value;
       await this.plugin.saveSettings();
