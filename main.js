@@ -306,7 +306,6 @@ function categorize(title, href) {
 
 // src/main.ts
 var path = __toESM(require("path"));
-var PLUGIN_VERSION = "3.1.6";
 var BrowserFavoritesPlugin = class extends import_obsidian3.Plugin {
   constructor() {
     super(...arguments);
@@ -315,8 +314,10 @@ var BrowserFavoritesPlugin = class extends import_obsidian3.Plugin {
   }
   async onload() {
     await this.loadSettings();
-    this.addRibbonIcon("browser", `Browser Favorites v${PLUGIN_VERSION}`, () => {
-      new import_obsidian3.Notice("This plugin cannot directly access browser bookmarks due to security restrictions. Please export your bookmarks as HTML and use the import functionality.");
+    this.addRibbonIcon("bookmark", "Import Browser Bookmarks", () => {
+      new FileUploadModal(this.app, (content) => {
+        this.importBookmarks(content);
+      }).open();
     });
     this.addSettingTab(new BrowserFavoritesSettingTab(this.app, this));
     this.addCommand({

@@ -24,7 +24,7 @@ import {
 } from './utils/bookmarkUtils';
 import * as path from 'path';
 
-const PLUGIN_VERSION = '3.1.6';
+const PLUGIN_VERSION = '3.1.8';
 
 export default class BrowserFavoritesPlugin extends Plugin {
     settings: BrowserFavoritesSettings;
@@ -33,9 +33,11 @@ export default class BrowserFavoritesPlugin extends Plugin {
     async onload() {
         await this.loadSettings();
 
-        // Version in der Ribbon-Icon Tooltip anzeigen
-        this.addRibbonIcon('browser', `Browser Favorites v${PLUGIN_VERSION}`, () => {
-            new Notice('This plugin cannot directly access browser bookmarks due to security restrictions. Please export your bookmarks as HTML and use the import functionality.');
+        // Füge Ribbon-Icon für schnellen Zugriff hinzu
+        this.addRibbonIcon('bookmark', 'Import Browser Bookmarks', () => {
+            new FileUploadModal(this.app, (content) => {
+                this.importBookmarks(content);
+            }).open();
         });
 
         this.addSettingTab(new BrowserFavoritesSettingTab(this.app, this));

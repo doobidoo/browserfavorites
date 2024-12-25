@@ -1,14 +1,19 @@
 # Obsidian Browser Favorites Plugin
 
-A plugin for [Obsidian](https://obsidian.md) that allows you to import your browser bookmarks into your vault as organized Markdown notes.
+A plugin for [Obsidian](https://obsidian.md) that allows you to import your browser bookmarks into your vault as organized Markdown notes, with advanced management features.
 
 ## Features
 
 - Import bookmarks from any browser's HTML bookmarks export
-- Automatically categorizes bookmarks into separate notes
+- Automatically categorizes bookmarks into separate notes with smart subcategories
 - Maintains clickable links with original titles
 - Customizable output folder location
-- Simple and intuitive user interface
+- Automatic deduplication of bookmarks
+- Bookmark accessibility checking
+- Smart tag extraction from titles and URLs
+- Metadata enrichment (descriptions and tags from websites)
+- Progress tracking for long operations
+- Selective file processing
 
 ## Installation
 
@@ -32,7 +37,7 @@ A plugin for [Obsidian](https://obsidian.md) that allows you to import your brow
 ### Exporting Bookmarks from Your Browser
 
 #### Chrome
-1. Open Chrome's Bookmark Manager (⌘/Ctrl + Shift + B)
+1. Open Chrome's Bookmark Manager (⌘/Ctrl + Shift + O)
 2. Click the three dots menu (⋮)
 3. Select "Export bookmarks"
 
@@ -41,31 +46,67 @@ A plugin for [Obsidian](https://obsidian.md) that allows you to import your brow
 2. Click "Bookmarks" → "Show All Bookmarks"
 3. Click "Import and Backup" → "Export Bookmarks to HTML"
 
-#### Safari
-1. Click File → "Export Bookmarks"
+#### Edge
+1. Click Settings
+2. Navigate to Favorites
+3. Click the three dots (⋮)
+4. Select "Export favorites"
 
 ### Importing into Obsidian
 
-1. Click the browser icon in the ribbon (sidebar) or use the command palette to run "Import Browser Bookmarks"
-2. Paste the content of your exported HTML file into the modal
-3. Click Import
+You can import bookmarks in two ways:
 
-Your bookmarks will be automatically categorized and saved as Markdown files in the specified output folder.
+1. Click the bookmark icon in the ribbon (left sidebar)
+2. Use the Command Palette (Ctrl/Cmd + P) and
+   - Run "Import Browser Bookmarks"
+   - Select your exported HTML file using the file picker
+   - Click Import
+
+Your bookmarks will be automatically:
+
+Your bookmarks will be automatically:
+- Deduplicated to remove any duplicates
+- Categorized into logical groups
+- Enhanced with metadata when possible
+- Saved as organized Markdown files
+
+### Managing Bookmarks
+
+#### Checking Bookmark Accessibility
+1. Use the command palette to run "Check Bookmarks Accessibility"
+2. Choose between checking all files or select specific ones
+3. Monitor the progress as the plugin checks each bookmark
+4. Results will show ✅ for accessible and ❌ for inaccessible links
+
+#### Cleaning Up Duplicates
+1. Use the command palette to run "Cleanup Duplicate Bookmarks"
+2. Choose between processing all files or select specific ones
+3. The plugin will automatically:
+   - Identify duplicate URLs
+   - Keep the newest version of each bookmark
+   - Combine tags from all duplicates
+   - Update the files accordingly
 
 ## Configuration
 
 You can configure the following settings:
 
 - **Output folder**: The folder where your bookmark notes will be created (default: "Browser Favorites")
+- **Check accessibility**: Enable/disable automatic bookmark accessibility checking
 
 ## Categories
 
-The plugin automatically categorizes bookmarks into the following default categories:
+The plugin automatically categorizes bookmarks into the following categories with smart subcategories:
 
-- News: Links containing "news" in the title
-- Reference: Links containing "wiki" in the title
-- Blogs: Links containing "blog" in the title
-- General: All other links
+- News (Technology, Business, Sports, Politics)
+- Reference (with Wikipedia category detection)
+- Blogs (Technology, Business, Sports, Politics)
+- Social Media (Social, Media)
+- Travel (Food, Travel)
+- Entertainment (Movies, Music, Gaming)
+- Health & Wellness (Fitness, Medicine, Nutrition)
+- Education (Tutorials, Courses)
+- General (for uncategorized bookmarks)
 
 ## Development
 
@@ -91,24 +132,26 @@ If you encounter any issues or have feature requests, please:
 
 ## Changelog
 
-### 1.0.0 (Initial Release)
-- Initial release with basic bookmark import functionality
-- Automatic categorization
-- Custom output folder support
-- Browser bookmark HTML import support
+### 3.1.6 (Current)
+- Added selective file processing for accessibility checks
+- Added progress tracking for long operations
+- Improved duplicate detection and cleanup
+- Enhanced metadata extraction
+- Added smart tag extraction
+- Added subcategory support
 
-## Version Control
-- npm version patch  # For 1.0.0 -> 1.0.1
-- npm version minor  # For 1.0.0 -> 1.1.0
-- npm version major  # For 1.0.0 -> 2.0.0
-or edit package.json and
-```
-npm run version-sync
-npm run build
-```
+[Previous versions changelog...]
+
+## Disclosures
+
+Network use: The plugin makes use of the network to:
+- Check bookmark accessibility
+- Fetch metadata from bookmarked sites (descriptions, tags)
+- Read meta information for enhanced categorization
+
 ## Credits
 
-Developed by [Your Name]
+Developed by Heinrich Krupp
 
 ## Acknowledgments
 
