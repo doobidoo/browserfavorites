@@ -1,7 +1,7 @@
 {
 	"id": "browser-favorites",
 	"name": "Browser Favorites",
-	"version": "3.1.8",
+	"version": "3.1.9",
 	"minAppVersion": "0.15.0",
 	"description": "Import browser bookmarks into Obsidian",
 	"author": "Heinrich Krupp",

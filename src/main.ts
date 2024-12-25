@@ -24,7 +24,7 @@ import {
 } from './utils/bookmarkUtils';
 import * as path from 'path';
 
-const PLUGIN_VERSION = '3.1.8';
+const PLUGIN_VERSION = '3.1.9';
 
 export default class BrowserFavoritesPlugin extends Plugin {
     settings: BrowserFavoritesSettings;
