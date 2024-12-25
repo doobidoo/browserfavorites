@@ -1,145 +1,30 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, ButtonComponent, normalizePath } from 'obsidian';
+// Importiere zusätzliche benötigte Obsidian-Module
+import { 
+    Plugin, 
+    Notice, 
+    TFile, 
+    App,
+    Modal,
+    Setting,
+    normalizePath 
+} from 'obsidian';
+import { FileUploadModal } from './ui/FileUploadModal';
+import { BrowserFavoritesSettingTab } from './ui/SettingTab';
+import { 
+    BrowserFavoritesSettings, 
+    Bookmark, 
+    DEFAULT_SETTINGS,
+    BOOKMARK_TABLE_HEADERS,
+    CategoryResult 
+} from './models/types';
+import {
+    deduplicateBookmarkArray,
+    formatBookmarkLine,
+    categorize
+} from './utils/bookmarkUtils';
 import * as path from 'path';
 
-const PLUGIN_VERSION = '2.2.0';
-
-const BOOKMARK_TABLE_HEADERS = {
-    columns: [
-        'Title',
-        'URL',
-        'Tags',
-        'Added',
-        'Description',
-        'Last Check',
-        'Status'
-    ],
-    get header(): string {
-        const headerRow = `| ${this.columns.join(' | ')} |`;
-        const separatorRow = `|${this.columns.map(() => '------').join('|')}|`;
-        return `${headerRow}\n${separatorRow}\n`;
-    }
-};
-interface BrowserFavoritesSettings {
-    outputFolderPath: string;
-    checkAccessibility: boolean;
-}
-
-const DEFAULT_SETTINGS: BrowserFavoritesSettings = {
-    outputFolderPath: 'Browser Favorites',
-    checkAccessibility: true
-}
-interface Bookmark {
-    title: string;
-    url: string;
-    tags: string[];
-    addDate: string;
-    lastModified: string;
-    description: string;
-    category?: string;    // Optional
-    subcategory?: string; // Optional
-}
-
-interface CategoryResult {
-    category: string;
-    subcategory: string;
-}
-
-class FileUploadModal extends Modal {
-    onFileUpload: (content: string) => void;
-
-    constructor(app: App, onFileUpload: (content: string) => void) {
-        super(app);
-        this.onFileUpload = onFileUpload;
-    }
-    contentEl!: HTMLElement;
-    titleEl!: HTMLElement;
-
-    onOpen() {
-        const {contentEl, titleEl} = this;
-
-        titleEl.setText('Import Browser Bookmarks');
-        
-        const instructions = contentEl.createEl("div");
-        instructions.createEl("p", {
-            text: "How to export your bookmarks:",
-            cls: "browser-favorites-header"
-        });
-        
-        const browserInstructions = instructions.createEl("div", {
-            cls: "browser-favorites-instructions"
-        });
-        
-        browserInstructions.createEl("p", {
-            text: "Chrome: Bookmarks Manager (Ctrl+Shift+O) → ⋮ → Export bookmarks"
-        });
-        browserInstructions.createEl("p", {
-            text: "Firefox: Bookmarks → Manage Bookmarks → Import and Backup → Export Bookmarks to HTML"
-        });
-        browserInstructions.createEl("p", {
-            text: "Edge: Settings → Favorites → ⋮ → Export favorites"
-        });
-
-        const fileInputContainer = contentEl.createEl("div", {
-            cls: "browser-favorites-file-input"
-        });
-
-        const fileInputButton = fileInputContainer.createEl("button", {
-            text: "Select Bookmarks HTML File",
-            cls: "browser-favorites-file-button"
-        });
-
-        const fileInput = fileInputContainer.createEl("input", {
-            attr: {
-                type: "file",
-                accept: ".html,.htm",
-                style: "display: none;"
-            }
-        });
-
-        const fileNameDisplay = fileInputContainer.createEl("div", {
-            cls: "browser-favorites-filename"
-        });
-
-        fileInput.addEventListener("change", () => {
-            const file = fileInput.files?.[0];
-            if (file) {
-                fileNameDisplay.setText(file.name);
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const content = e.target?.result;
-                    if (typeof content === 'string') {
-                        this.onFileUpload(content);
-                        this.close();
-                    } else {
-                        new Notice("Unable to read file content. Please make sure it's a text file.");
-                    }
-                };
-                reader.onerror = (error) => {
-                    console.error('Error reading file:', error);
-                    new Notice("Error reading file. Please try again.");
-                };
-                reader.readAsText(file);
-            }
-        });
-
-        fileInputButton.addEventListener("click", () => {
-            fileInput.click();
-        });
-
-        new Setting(contentEl)
-            .addButton((button: ButtonComponent) => {
-                button.setButtonText("Cancel")
-                    .onClick(() => {
-                        this.close();
-                    });
-            });
-    }
-
-    onClose() {
-        const {contentEl} = this;
-        contentEl.empty();
-    }
-}
+const PLUGIN_VERSION = '3.1.6';
 
 export default class BrowserFavoritesPlugin extends Plugin {
     settings: BrowserFavoritesSettings;
@@ -283,7 +168,7 @@ export default class BrowserFavoritesPlugin extends Plugin {
                 
                 if (line.startsWith('| Title |')) {
                     isInTable = true;
-                    modifiedLines[i] = BOOKMARK_TABLE_HEADERS.header;
+                    modifiedLines[i] = BOOKMARK_TABLE_HEADERS.header.trimEnd();
                     i++;
                     continue;
                 }
@@ -337,13 +222,27 @@ export default class BrowserFavoritesPlugin extends Plugin {
     
     // Neue Hilfsmethode zur Dateiauswahl
     private async selectFilesToCheck(files: TFile[]): Promise<TFile[]> {
-        return new Promise(resolve => {
+        return new Promise(async (resolve) => {
             const modal = new Modal(this.app);
             modal.titleEl.setText('Select files to check');
             
             const selectedFiles = new Set<TFile>();
+            const bookmarkCounts = new Map<TFile, number>();
+            
+            // Zähle Bookmarks pro Datei
+            for (const file of files) {
+                const content = await this.app.vault.read(file);
+                const count = content.split('\n').filter(line => 
+                    line.startsWith('|') && 
+                    !line.startsWith('| Title') && 
+                    !line.startsWith('|--') &&
+                    line.includes('[🔗]')
+                ).length;
+                bookmarkCounts.set(file, count);
+            }
             
             files.forEach(file => {
+                const count = bookmarkCounts.get(file) || 0;
                 const setting = new Setting(modal.contentEl)
                     .addToggle(toggle => toggle
                         .onChange(value => {
@@ -353,7 +252,7 @@ export default class BrowserFavoritesPlugin extends Plugin {
                                 selectedFiles.delete(file);
                             }
                         }))
-                    .setName(file.basename);
+                    .setName(`${file.basename} (${count} bookmarks)`);
             });
     
             new Setting(modal.contentEl)
@@ -361,6 +260,9 @@ export default class BrowserFavoritesPlugin extends Plugin {
                     .setButtonText('Confirm')
                     .onClick(() => {
                         modal.close();
+                        // Berechne die neue Gesamtzahl der Bookmarks
+                        const totalSelectedBookmarks = Array.from(selectedFiles)
+                            .reduce((sum, file) => sum + (bookmarkCounts.get(file) || 0), 0);
                         resolve(Array.from(selectedFiles));
                     }))
                 .addButton(btn => btn
@@ -373,7 +275,7 @@ export default class BrowserFavoritesPlugin extends Plugin {
             modal.open();
         });
     }
-    
+
     // Ausgelagerte fetchMetaInfo Methode
     private async fetchMetaInfo(url: string) {
         try {
@@ -397,120 +299,6 @@ export default class BrowserFavoritesPlugin extends Plugin {
             console.error('Error fetching meta info:', error);
             throw error;
         }
-    }
-	
-    categorize(title: string, href: string): CategoryResult {
-        const lowerTitle = title.toLowerCase();
-        const lowerUrl = href.toLowerCase();
-        
-        // Default category and subcategory
-        let category = 'General';
-        let subcategory = '';
-    
-        // Helper function to check keywords
-        const matchesKeywords = (text: string, keywords: string[]): boolean => 
-            keywords.some(keyword => text.includes(keyword));
-    
-		// Define category rules
-		const categoryRules = [
-			{
-				category: 'News',
-				keywords: ['news'],
-				subcategories: {
-					Technology: ['tech'],
-					Business: ['business'],
-					Sports: ['sports', 'sport'],
-					Politics: ['politics', 'government']
-				}
-			},
-			{
-				category: 'Reference',
-				keywords: ['wiki', 'wikipedia'],
-				extractSubcategory: (lowerUrl: string) => {
-					const match = lowerUrl.match(/wikipedia\.org\/wiki\/Category:(.+)/);
-					return match ? match[1].replace(/_/g, ' ').split('/')[0] : '';
-				}
-			},
-			{
-				category: 'Blogs',
-				keywords: ['blog'],
-				subcategories: {
-					Technology: ['tech', 'programming'],
-					Business: ['business', 'economics'],
-					Sports: ['sports', 'sport'],
-					Politics: ['politics', 'government']
-				}
-			},
-			{
-				category: 'Social Media',
-				keywords: ['social', 'media'],
-				subcategories: {
-					Social: ['social', 'community'],
-					Media: ['media', 'news']
-				}
-			},
-			{
-				category: 'Travel',
-				keywords: ['travel', 'tourism'],
-				subcategories: {
-					Food: ['food', 'recipes'],
-					Travel: ['travel', 'tourism']
-				}
-			},
-			{
-				category: 'Entertainment',
-				keywords: ['movies', 'music', 'games'],
-				subcategories: {
-					Movies: ['movies', 'films', 'cinema'],
-					Music: ['music', 'songs'],
-					Gaming: ['games', 'gaming']
-				}
-			},
-			{
-				category: 'Health & Wellness',
-				keywords: ['health', 'wellness', 'fitness', 'medicine'],
-				subcategories: {
-					Fitness: ['fitness', 'exercise', 'workout'],
-					Medicine: ['medicine', 'medical'],
-					Nutrition: ['nutrition', 'diet']
-				}
-			},
-			{
-				category: 'Education',
-				keywords: ['learn', 'education', 'tutorials'],
-				subcategories: {
-					Tutorials: ['tutorial', 'how-to'],
-					Courses: ['course', 'class']
-				}
-			}
-			// Add more categories and subcategories as needed
-		];
-    
-        // Check categories
-        for (const rule of categoryRules) {
-            if (matchesKeywords(lowerTitle, rule.keywords) || matchesKeywords(lowerUrl, rule.keywords)) {
-                category = rule.category;
-    
-                // Check subcategories
-                if (rule.subcategories) {
-                    for (const [subcat, subcatKeywords] of Object.entries(rule.subcategories)) {
-                        if (matchesKeywords(lowerTitle, subcatKeywords) || matchesKeywords(lowerUrl, subcatKeywords)) {
-                            subcategory = subcat;
-                            break;
-                        }
-                    }
-                }
-    
-                // Extract subcategory if defined
-                if (!subcategory && rule.extractSubcategory) {
-                    subcategory = rule.extractSubcategory(lowerUrl);
-                }
-    
-                break;
-            }
-        }
-    
-        return { category, subcategory };
     }
 
     extractTags(title: string, url: string): string[] {
@@ -546,8 +334,7 @@ export default class BrowserFavoritesPlugin extends Plugin {
 
         return Array.from(tags);
     }
-
-    
+ 
     // Neue Hilfsmethode zum Abbrechen von Operationen
     private abortController: AbortController | null = null;
 
@@ -743,35 +530,6 @@ export default class BrowserFavoritesPlugin extends Plugin {
         }
     }
 
-    
-    // Hilfsmethode zur Deduplizierung eines Bookmark-Arrays
-    private deduplicateBookmarkArray(bookmarks: Bookmark[]): Bookmark[] {
-        const bookmarkMap = new Map<string, Bookmark[]>();
-        
-        bookmarks.forEach(bookmark => {
-            const existingGroup = bookmarkMap.get(bookmark.url) || [];
-            existingGroup.push(bookmark);
-            bookmarkMap.set(bookmark.url, existingGroup);
-        });
-    
-        return Array.from(bookmarkMap.values()).map(group => {
-            const newestBookmark = group.reduce((newest, current) => {
-                const newestDate = newest.addDate ? new Date(parseInt(newest.addDate) * 1000) : new Date(0);
-                const currentDate = current.addDate ? new Date(parseInt(current.addDate) * 1000) : new Date(0);
-                return currentDate > newestDate ? current : newest;
-            });
-            
-            // Kombiniere Tags von allen Duplikaten
-            const allTags = new Set<string>();
-            group.forEach(bookmark => {
-                bookmark.tags.forEach(tag => allTags.add(tag));
-            });
-            newestBookmark.tags = Array.from(allTags);
-            
-            return newestBookmark;
-        });
-    }
-
     // Update der Import-Methode
     async importBookmarks(htmlContent: string) {
         const parser = new DOMParser();
@@ -901,27 +659,6 @@ export default class BrowserFavoritesPlugin extends Plugin {
         }
     }
 
-    // Neue Hilfsmethode zum Formatieren der Bookmark-Zeilen
-    private formatBookmarkLine(bookmark: Bookmark): string {
-        const formatCell = (content: string): string => {
-            if (!content) return '';
-            return content
-                .replace(/\|/g, '\\|')
-                .replace(/\n/g, ' ')
-                .trim();
-        };
-
-        const formattedTitle = formatCell(bookmark.title);
-        const formattedUrl = `[🔗](${bookmark.url})`;
-        const formattedTags = formatCell(bookmark.tags.join(' '));
-        const formattedDate = formatCell(bookmark.addDate || '');
-        const formattedDesc = formatCell(bookmark.description || '');
-        const lastCheck = '';
-        const status = '';
-
-        return `| ${formattedTitle} | ${formattedUrl} | ${formattedTags} | ${formattedDate} | ${formattedDesc} | ${lastCheck} | ${status} |\n`;
-    }
-
     private parseBookmarks(element: HTMLElement): Bookmark[] {
         const bookmarks: Bookmark[] = [];
         
@@ -966,47 +703,18 @@ export default class BrowserFavoritesPlugin extends Plugin {
         traverse(element);
         return bookmarks;
     }
-}
 
-class BrowserFavoritesSettingTab extends PluginSettingTab {
-    plugin: BrowserFavoritesPlugin;
-    containerEl!: HTMLElement;
-
-    constructor(app: App, plugin: BrowserFavoritesPlugin) {
-        super(app, plugin);
-        this.plugin = plugin;
+    // Hilfsmethoden als Klassenmethoden
+    private deduplicateBookmarkArray(bookmarks: Bookmark[]): Bookmark[] {
+        return deduplicateBookmarkArray(bookmarks);
     }
 
-    display(): void {
-        const {containerEl} = this;
-        containerEl.empty();
-        containerEl.createEl('h2', {text: 'Browser Favorites Settings'});
-        
-        new Setting(containerEl)
-            .setName('Output folder')
-            .setDesc('Where to store the imported bookmarks')
-            .addText(text => text
-                .setPlaceholder('Browser Favorites')
-                .setValue(this.plugin.settings.outputFolderPath)
-                .onChange(async (value) => {
-                    this.plugin.settings.outputFolderPath = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Check bookmark accessibility')
-            .setDesc('Periodically check if bookmarks are still accessible (may affect performance)')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.checkAccessibility)
-                .onChange(async (value) => {
-                    this.plugin.settings.checkAccessibility = value;
-                    await this.plugin.saveSettings();
-                }));
-    
-        // Version am Ende der Settings anzeigen
-        containerEl.createEl('div', {
-            text: `Version: ${PLUGIN_VERSION}`,
-            cls: 'browser-favorites-version-info'
-        });
+    private formatBookmarkLine(bookmark: Bookmark): string {
+        return formatBookmarkLine(bookmark);
     }
+
+    private categorize(title: string, url: string): CategoryResult {
+        return categorize(title, url);
+    }
+
 }

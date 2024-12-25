@@ -37,31 +37,10 @@ __export(main_exports, {
   default: () => BrowserFavoritesPlugin
 });
 module.exports = __toCommonJS(main_exports);
+var import_obsidian3 = require("obsidian");
+
+// src/ui/FileUploadModal.ts
 var import_obsidian = require("obsidian");
-var path = __toESM(require("path"));
-var PLUGIN_VERSION = "2.2.0";
-var BOOKMARK_TABLE_HEADERS = {
-  columns: [
-    "Title",
-    "URL",
-    "Tags",
-    "Added",
-    "Description",
-    "Last Check",
-    "Status"
-  ],
-  get header() {
-    const headerRow = `| ${this.columns.join(" | ")} |`;
-    const separatorRow = `|${this.columns.map(() => "------").join("|")}|`;
-    return `${headerRow}
-${separatorRow}
-`;
-  }
-};
-var DEFAULT_SETTINGS = {
-  outputFolderPath: "Browser Favorites",
-  checkAccessibility: true
-};
 var FileUploadModal = class extends import_obsidian.Modal {
   constructor(app, onFileUpload) {
     super(app);
@@ -141,7 +120,194 @@ var FileUploadModal = class extends import_obsidian.Modal {
     contentEl.empty();
   }
 };
-var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
+
+// src/ui/SettingTab.ts
+var import_obsidian2 = require("obsidian");
+var BrowserFavoritesSettingTab = class extends import_obsidian2.PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl("h2", { text: "Browser Favorites Settings" });
+    new import_obsidian2.Setting(containerEl).setName("Output folder").setDesc("Where to store the imported bookmarks").addText((text) => text.setPlaceholder("Browser Favorites").setValue(this.plugin.settings.outputFolderPath).onChange(async (value) => {
+      this.plugin.settings.outputFolderPath = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian2.Setting(containerEl).setName("Check bookmark accessibility").setDesc("Periodically check if bookmarks are still accessible (may affect performance)").addToggle((toggle) => toggle.setValue(this.plugin.settings.checkAccessibility).onChange(async (value) => {
+      this.plugin.settings.checkAccessibility = value;
+      await this.plugin.saveSettings();
+    }));
+  }
+};
+
+// src/models/types.ts
+var DEFAULT_SETTINGS = {
+  outputFolderPath: "Browser Favorites",
+  checkAccessibility: true
+};
+var BOOKMARK_TABLE_HEADERS = {
+  columns: [
+    "Title",
+    "URL",
+    "Tags",
+    "Added",
+    "Description",
+    "Last Check",
+    "Status"
+  ],
+  get header() {
+    const headerRow = `| ${this.columns.join(" | ")} |`;
+    const separatorRow = `|${this.columns.map(() => "------").join("|")}|`;
+    return `${headerRow}
+${separatorRow}
+`;
+  }
+};
+
+// src/utils/bookmarkUtils.ts
+function deduplicateBookmarkArray(bookmarks) {
+  const bookmarkMap = /* @__PURE__ */ new Map();
+  bookmarks.forEach((bookmark) => {
+    const existingGroup = bookmarkMap.get(bookmark.url) || [];
+    existingGroup.push(bookmark);
+    bookmarkMap.set(bookmark.url, existingGroup);
+  });
+  return Array.from(bookmarkMap.values()).map((group) => {
+    const newestBookmark = group.reduce((newest, current) => {
+      const newestDate = newest.addDate ? new Date(parseInt(newest.addDate) * 1e3) : new Date(0);
+      const currentDate = current.addDate ? new Date(parseInt(current.addDate) * 1e3) : new Date(0);
+      return currentDate > newestDate ? current : newest;
+    });
+    const allTags = /* @__PURE__ */ new Set();
+    group.forEach((bookmark) => {
+      bookmark.tags.forEach((tag) => allTags.add(tag));
+    });
+    newestBookmark.tags = Array.from(allTags);
+    return newestBookmark;
+  });
+}
+function formatBookmarkLine(bookmark) {
+  const formatCell = (content) => {
+    if (!content)
+      return "";
+    return content.replace(/\|/g, "\\|").replace(/\n/g, " ").trim();
+  };
+  const formattedTitle = formatCell(bookmark.title);
+  const formattedUrl = `[\u{1F517}](${bookmark.url})`;
+  const formattedTags = formatCell(bookmark.tags.join(" "));
+  const formattedDate = formatCell(bookmark.addDate || "");
+  const formattedDesc = formatCell(bookmark.description || "");
+  const lastCheck = "";
+  const status = "";
+  return `| ${formattedTitle} | ${formattedUrl} | ${formattedTags} | ${formattedDate} | ${formattedDesc} | ${lastCheck} | ${status} |
+`;
+}
+function categorize(title, href) {
+  const lowerTitle = title.toLowerCase();
+  const lowerUrl = href.toLowerCase();
+  let category = "General";
+  let subcategory = "";
+  const matchesKeywords = (text, keywords) => keywords.some((keyword) => text.includes(keyword));
+  const categoryRules = [
+    {
+      category: "News",
+      keywords: ["news"],
+      subcategories: {
+        Technology: ["tech"],
+        Business: ["business"],
+        Sports: ["sports", "sport"],
+        Politics: ["politics", "government"]
+      }
+    },
+    {
+      category: "Reference",
+      keywords: ["wiki", "wikipedia"],
+      extractSubcategory: (lowerUrl2) => {
+        const match = lowerUrl2.match(/wikipedia\.org\/wiki\/Category:(.+)/);
+        return match ? match[1].replace(/_/g, " ").split("/")[0] : "";
+      }
+    },
+    {
+      category: "Blogs",
+      keywords: ["blog"],
+      subcategories: {
+        Technology: ["tech", "programming"],
+        Business: ["business", "economics"],
+        Sports: ["sports", "sport"],
+        Politics: ["politics", "government"]
+      }
+    },
+    {
+      category: "Social Media",
+      keywords: ["social", "media"],
+      subcategories: {
+        Social: ["social", "community"],
+        Media: ["media", "news"]
+      }
+    },
+    {
+      category: "Travel",
+      keywords: ["travel", "tourism"],
+      subcategories: {
+        Food: ["food", "recipes"],
+        Travel: ["travel", "tourism"]
+      }
+    },
+    {
+      category: "Entertainment",
+      keywords: ["movies", "music", "games"],
+      subcategories: {
+        Movies: ["movies", "films", "cinema"],
+        Music: ["music", "songs"],
+        Gaming: ["games", "gaming"]
+      }
+    },
+    {
+      category: "Health & Wellness",
+      keywords: ["health", "wellness", "fitness", "medicine"],
+      subcategories: {
+        Fitness: ["fitness", "exercise", "workout"],
+        Medicine: ["medicine", "medical"],
+        Nutrition: ["nutrition", "diet"]
+      }
+    },
+    {
+      category: "Education",
+      keywords: ["learn", "education", "tutorials"],
+      subcategories: {
+        Tutorials: ["tutorial", "how-to"],
+        Courses: ["course", "class"]
+      }
+    }
+    // Add more categories and subcategories as needed
+  ];
+  for (const rule of categoryRules) {
+    if (matchesKeywords(lowerTitle, rule.keywords) || matchesKeywords(lowerUrl, rule.keywords)) {
+      category = rule.category;
+      if (rule.subcategories) {
+        for (const [subcat, subcatKeywords] of Object.entries(rule.subcategories)) {
+          if (matchesKeywords(lowerTitle, subcatKeywords) || matchesKeywords(lowerUrl, subcatKeywords)) {
+            subcategory = subcat;
+            break;
+          }
+        }
+      }
+      if (!subcategory && rule.extractSubcategory) {
+        subcategory = rule.extractSubcategory(lowerUrl);
+      }
+      break;
+    }
+  }
+  return { category, subcategory };
+}
+
+// src/main.ts
+var path = __toESM(require("path"));
+var PLUGIN_VERSION = "3.1.6";
+var BrowserFavoritesPlugin = class extends import_obsidian3.Plugin {
   constructor() {
     super(...arguments);
     // Neue Hilfsmethode zum Abbrechen von Operationen
@@ -150,7 +316,7 @@ var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
   async onload() {
     await this.loadSettings();
     this.addRibbonIcon("browser", `Browser Favorites v${PLUGIN_VERSION}`, () => {
-      new import_obsidian.Notice("This plugin cannot directly access browser bookmarks due to security restrictions. Please export your bookmarks as HTML and use the import functionality.");
+      new import_obsidian3.Notice("This plugin cannot directly access browser bookmarks due to security restrictions. Please export your bookmarks as HTML and use the import functionality.");
     });
     this.addSettingTab(new BrowserFavoritesSettingTab(this.app, this));
     this.addCommand({
@@ -167,7 +333,7 @@ var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
       name: "Cleanup Duplicate Bookmarks",
       callback: async () => {
         await this.cleanupDuplicates();
-        new import_obsidian.Notice("Duplicate cleanup completed!");
+        new import_obsidian3.Notice("Duplicate cleanup completed!");
       }
     });
     this.addCommand({
@@ -175,10 +341,10 @@ var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
       name: "Check Bookmarks Accessibility",
       callback: async () => {
         if (!this.settings.checkAccessibility) {
-          new import_obsidian.Notice("Bookmark accessibility checking is disabled. Enable it in settings first.");
+          new import_obsidian3.Notice("Bookmark accessibility checking is disabled. Enable it in settings first.");
           return;
         }
-        new import_obsidian.Notice("Starting bookmark accessibility check...");
+        new import_obsidian3.Notice("Starting bookmark accessibility check...");
         await this.checkBookmarksAccessibility();
       }
     });
@@ -192,7 +358,7 @@ var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
   async checkBookmarksAccessibility() {
     if (!this.settings.checkAccessibility)
       return;
-    const outputFolderPath = (0, import_obsidian.normalizePath)(this.settings.outputFolderPath);
+    const outputFolderPath = (0, import_obsidian3.normalizePath)(this.settings.outputFolderPath);
     const files = this.app.vault.getFiles().filter(
       (file) => file.path.startsWith(outputFolderPath) && file.extension === "md"
     );
@@ -205,11 +371,11 @@ var BrowserFavoritesPlugin = class extends import_obsidian.Plugin {
       totalBookmarks += bookmarkLines.length;
     }
     if (totalBookmarks === 0) {
-      new import_obsidian.Notice("No bookmarks found to check!");
+      new import_obsidian3.Notice("No bookmarks found to check!");
       return;
     }
     const shouldCheckAll = await new Promise((resolve) => {
-      const notice = new import_obsidian.Notice(
+      const notice = new import_obsidian3.Notice(
         `Found ${totalBookmarks} bookmarks in ${files.length} files.
 Check all?`,
         0
@@ -227,7 +393,7 @@ Check all?`,
     if (!shouldCheckAll) {
       filesToCheck = await this.selectFilesToCheck(files);
       if (filesToCheck.length === 0) {
-        new import_obsidian.Notice("No files selected for checking.");
+        new import_obsidian3.Notice("No files selected for checking.");
         return;
       }
     }
@@ -238,7 +404,7 @@ Check all?`,
       inaccessible: 0,
       errors: []
     };
-    const progressNotice = new import_obsidian.Notice("", 0);
+    const progressNotice = new import_obsidian3.Notice("", 0);
     const updateProgress = (file, current, total) => {
       const percent = Math.round(current / total * 100);
       const fileName = file.basename;
@@ -257,7 +423,7 @@ Progress: ${current}/${total} (${percent}%)
         const line = lines[i];
         if (line.startsWith("| Title |")) {
           isInTable = true;
-          modifiedLines[i] = BOOKMARK_TABLE_HEADERS.header;
+          modifiedLines[i] = BOOKMARK_TABLE_HEADERS.header.trimEnd();
           i++;
           continue;
         }
@@ -293,7 +459,7 @@ Progress: ${current}/${total} (${percent}%)
       }
     }
     progressNotice.hide();
-    new import_obsidian.Notice(
+    new import_obsidian3.Notice(
       `Accessibility check complete!
 \u2705 Accessible: ${results.accessible}
 \u274C Inaccessible: ${results.inaccessible}`
@@ -303,21 +469,31 @@ Progress: ${current}/${total} (${percent}%)
   }
   // Neue Hilfsmethode zur Dateiauswahl
   async selectFilesToCheck(files) {
-    return new Promise((resolve) => {
-      const modal = new import_obsidian.Modal(this.app);
+    return new Promise(async (resolve) => {
+      const modal = new import_obsidian3.Modal(this.app);
       modal.titleEl.setText("Select files to check");
       const selectedFiles = /* @__PURE__ */ new Set();
+      const bookmarkCounts = /* @__PURE__ */ new Map();
+      for (const file of files) {
+        const content = await this.app.vault.read(file);
+        const count = content.split("\n").filter(
+          (line) => line.startsWith("|") && !line.startsWith("| Title") && !line.startsWith("|--") && line.includes("[\u{1F517}]")
+        ).length;
+        bookmarkCounts.set(file, count);
+      }
       files.forEach((file) => {
-        const setting = new import_obsidian.Setting(modal.contentEl).addToggle((toggle) => toggle.onChange((value) => {
+        const count = bookmarkCounts.get(file) || 0;
+        const setting = new import_obsidian3.Setting(modal.contentEl).addToggle((toggle) => toggle.onChange((value) => {
           if (value) {
             selectedFiles.add(file);
           } else {
             selectedFiles.delete(file);
           }
-        })).setName(file.basename);
+        })).setName(`${file.basename} (${count} bookmarks)`);
       });
-      new import_obsidian.Setting(modal.contentEl).addButton((btn) => btn.setButtonText("Confirm").onClick(() => {
+      new import_obsidian3.Setting(modal.contentEl).addButton((btn) => btn.setButtonText("Confirm").onClick(() => {
         modal.close();
+        const totalSelectedBookmarks = Array.from(selectedFiles).reduce((sum, file) => sum + (bookmarkCounts.get(file) || 0), 0);
         resolve(Array.from(selectedFiles));
       })).addButton((btn) => btn.setButtonText("Cancel").onClick(() => {
         modal.close();
@@ -346,104 +522,6 @@ Progress: ${current}/${total} (${percent}%)
       console.error("Error fetching meta info:", error);
       throw error;
     }
-  }
-  categorize(title, href) {
-    const lowerTitle = title.toLowerCase();
-    const lowerUrl = href.toLowerCase();
-    let category = "General";
-    let subcategory = "";
-    const matchesKeywords = (text, keywords) => keywords.some((keyword) => text.includes(keyword));
-    const categoryRules = [
-      {
-        category: "News",
-        keywords: ["news"],
-        subcategories: {
-          Technology: ["tech"],
-          Business: ["business"],
-          Sports: ["sports", "sport"],
-          Politics: ["politics", "government"]
-        }
-      },
-      {
-        category: "Reference",
-        keywords: ["wiki", "wikipedia"],
-        extractSubcategory: (lowerUrl2) => {
-          const match = lowerUrl2.match(/wikipedia\.org\/wiki\/Category:(.+)/);
-          return match ? match[1].replace(/_/g, " ").split("/")[0] : "";
-        }
-      },
-      {
-        category: "Blogs",
-        keywords: ["blog"],
-        subcategories: {
-          Technology: ["tech", "programming"],
-          Business: ["business", "economics"],
-          Sports: ["sports", "sport"],
-          Politics: ["politics", "government"]
-        }
-      },
-      {
-        category: "Social Media",
-        keywords: ["social", "media"],
-        subcategories: {
-          Social: ["social", "community"],
-          Media: ["media", "news"]
-        }
-      },
-      {
-        category: "Travel",
-        keywords: ["travel", "tourism"],
-        subcategories: {
-          Food: ["food", "recipes"],
-          Travel: ["travel", "tourism"]
-        }
-      },
-      {
-        category: "Entertainment",
-        keywords: ["movies", "music", "games"],
-        subcategories: {
-          Movies: ["movies", "films", "cinema"],
-          Music: ["music", "songs"],
-          Gaming: ["games", "gaming"]
-        }
-      },
-      {
-        category: "Health & Wellness",
-        keywords: ["health", "wellness", "fitness", "medicine"],
-        subcategories: {
-          Fitness: ["fitness", "exercise", "workout"],
-          Medicine: ["medicine", "medical"],
-          Nutrition: ["nutrition", "diet"]
-        }
-      },
-      {
-        category: "Education",
-        keywords: ["learn", "education", "tutorials"],
-        subcategories: {
-          Tutorials: ["tutorial", "how-to"],
-          Courses: ["course", "class"]
-        }
-      }
-      // Add more categories and subcategories as needed
-    ];
-    for (const rule of categoryRules) {
-      if (matchesKeywords(lowerTitle, rule.keywords) || matchesKeywords(lowerUrl, rule.keywords)) {
-        category = rule.category;
-        if (rule.subcategories) {
-          for (const [subcat, subcatKeywords] of Object.entries(rule.subcategories)) {
-            if (matchesKeywords(lowerTitle, subcatKeywords) || matchesKeywords(lowerUrl, subcatKeywords)) {
-              subcategory = subcat;
-              break;
-            }
-          }
-        }
-        if (!subcategory && rule.extractSubcategory) {
-          subcategory = rule.extractSubcategory(lowerUrl);
-        }
-        break;
-      }
-    }
-    return { category, subcategory };
   }
   extractTags(title, url) {
     const tags = /* @__PURE__ */ new Set();
@@ -489,7 +567,7 @@ Progress: ${current}/${total} (${percent}%)
   async cleanupDuplicates() {
     var _a, _b, _c, _d;
     this.abortController = new AbortController();
-    const outputFolderPath = (0, import_obsidian.normalizePath)(this.settings.outputFolderPath);
+    const outputFolderPath = (0, import_obsidian3.normalizePath)(this.settings.outputFolderPath);
     const files = this.app.vault.getFiles().filter(
       (file) => file.path.startsWith(outputFolderPath) && file.extension === "md"
     );
@@ -502,11 +580,11 @@ Progress: ${current}/${total} (${percent}%)
       totalBookmarks += bookmarkLines.length;
     }
     if (totalBookmarks === 0) {
-      new import_obsidian.Notice("No bookmarks found to deduplicate!");
+      new import_obsidian3.Notice("No bookmarks found to deduplicate!");
       return;
     }
     const shouldCheckAll = await new Promise((resolve) => {
-      const notice = new import_obsidian.Notice(
+      const notice = new import_obsidian3.Notice(
         `Found ${totalBookmarks} bookmarks in ${files.length} files.
 Check all?`,
         0
@@ -524,11 +602,11 @@ Check all?`,
     if (!shouldCheckAll) {
       filesToCheck = await this.selectFilesToCheck(files);
       if (filesToCheck.length === 0) {
-        new import_obsidian.Notice("No files selected for deduplication.");
+        new import_obsidian3.Notice("No files selected for deduplication.");
         return;
       }
     }
-    const progressNotice = new import_obsidian.Notice("", 0);
+    const progressNotice = new import_obsidian3.Notice("", 0);
     let processedBookmarks = 0;
     let duplicatesFound = 0;
     const updateProgress = (file, current, total, duplicates) => {
@@ -539,14 +617,14 @@ Progress: ${current}/${total} (${percent}%)
 Duplicates found: ${duplicates}`
       );
     };
-    const abortNotice = new import_obsidian.Notice("", 0);
+    const abortNotice = new import_obsidian3.Notice("", 0);
     abortNotice.noticeEl.createEl("button", {
       text: "Cancel Deduplication",
       cls: "mod-warning"
     }).onclick = () => {
       if (this.abortController) {
         this.abortController.abort();
-        new import_obsidian.Notice("Deduplication cancelled!");
+        new import_obsidian3.Notice("Deduplication cancelled!");
       }
     };
     try {
@@ -623,7 +701,7 @@ Duplicates found: ${duplicates}`
       progressNotice.hide();
       abortNotice.hide();
       if (!((_d = this.abortController) == null ? void 0 : _d.signal.aborted)) {
-        new import_obsidian.Notice(
+        new import_obsidian3.Notice(
           `Deduplication complete!
 Processed: ${processedBookmarks} bookmarks
 Removed: ${duplicatesFound} duplicates`
@@ -631,32 +709,10 @@ Removed: ${duplicatesFound} duplicates`
       }
     } catch (error) {
       console.error("Error during deduplication:", error);
-      new import_obsidian.Notice("Error during deduplication. Check console for details.");
+      new import_obsidian3.Notice("Error during deduplication. Check console for details.");
     } finally {
       this.abortController = null;
     }
-  }
-  // Hilfsmethode zur Deduplizierung eines Bookmark-Arrays
-  deduplicateBookmarkArray(bookmarks) {
-    const bookmarkMap = /* @__PURE__ */ new Map();
-    bookmarks.forEach((bookmark) => {
-      const existingGroup = bookmarkMap.get(bookmark.url) || [];
-      existingGroup.push(bookmark);
-      bookmarkMap.set(bookmark.url, existingGroup);
-    });
-    return Array.from(bookmarkMap.values()).map((group) => {
-      const newestBookmark = group.reduce((newest, current) => {
-        const newestDate = newest.addDate ? new Date(parseInt(newest.addDate) * 1e3) : new Date(0);
-        const currentDate = current.addDate ? new Date(parseInt(current.addDate) * 1e3) : new Date(0);
-        return currentDate > newestDate ? current : newest;
-      });
-      const allTags = /* @__PURE__ */ new Set();
-      group.forEach((bookmark) => {
-        bookmark.tags.forEach((tag) => allTags.add(tag));
-      });
-      newestBookmark.tags = Array.from(allTags);
-      return newestBookmark;
-    });
   }
   // Update der Import-Methode
   async importBookmarks(htmlContent) {
@@ -686,13 +742,13 @@ Removed: ${duplicatesFound} duplicates`
         }
       }
     }
-    new import_obsidian.Notice(`Import completed! ${deduplicatedBookmarks.length} bookmarks processed.`);
+    new import_obsidian3.Notice(`Import completed! ${deduplicatedBookmarks.length} bookmarks processed.`);
   }
   async readExistingBookmarks(category, subcategory) {
-    const outputFolderPath = (0, import_obsidian.normalizePath)(this.settings.outputFolderPath);
-    const fileName = (0, import_obsidian.normalizePath)(path.join(outputFolderPath, `${category}.md`));
+    const outputFolderPath = (0, import_obsidian3.normalizePath)(this.settings.outputFolderPath);
+    const fileName = (0, import_obsidian3.normalizePath)(path.join(outputFolderPath, `${category}.md`));
     const file = this.app.vault.getAbstractFileByPath(fileName);
-    if (!file || !(file instanceof import_obsidian.TFile))
+    if (!file || !(file instanceof import_obsidian3.TFile))
       return /* @__PURE__ */ new Set();
     const content = await this.app.vault.read(file);
     const existingUrls = /* @__PURE__ */ new Set();
@@ -713,15 +769,15 @@ Removed: ${duplicatesFound} duplicates`
     return existingUrls;
   }
   async appendBookmarks(category, subcategory, newBookmarks) {
-    const outputFolderPath = (0, import_obsidian.normalizePath)(this.settings.outputFolderPath);
+    const outputFolderPath = (0, import_obsidian3.normalizePath)(this.settings.outputFolderPath);
     if (!this.app.vault.getAbstractFileByPath(outputFolderPath)) {
       await this.app.vault.createFolder(outputFolderPath);
     }
-    const fileName = (0, import_obsidian.normalizePath)(path.join(outputFolderPath, `${category}.md`));
+    const fileName = (0, import_obsidian3.normalizePath)(path.join(outputFolderPath, `${category}.md`));
     const file = this.app.vault.getAbstractFileByPath(fileName);
     const tableHeader = BOOKMARK_TABLE_HEADERS.header;
     let content = "";
-    if (file instanceof import_obsidian.TFile) {
+    if (file instanceof import_obsidian3.TFile) {
       const existingContent = await this.app.vault.read(file);
       const sections = existingContent.split(/(?=## )/);
       let subcategoryFound = false;
@@ -758,28 +814,11 @@ ${BOOKMARK_TABLE_HEADERS.header}`;
         content += this.formatBookmarkLine(bookmark);
       });
     }
-    if (file instanceof import_obsidian.TFile) {
+    if (file instanceof import_obsidian3.TFile) {
       await this.app.vault.modify(file, content);
     } else {
       await this.app.vault.create(fileName, content);
     }
-  }
-  // Neue Hilfsmethode zum Formatieren der Bookmark-Zeilen
-  formatBookmarkLine(bookmark) {
-    const formatCell = (content) => {
-      if (!content)
-        return "";
-      return content.replace(/\|/g, "\\|").replace(/\n/g, " ").trim();
-    };
-    const formattedTitle = formatCell(bookmark.title);
-    const formattedUrl = `[\u{1F517}](${bookmark.url})`;
-    const formattedTags = formatCell(bookmark.tags.join(" "));
-    const formattedDate = formatCell(bookmark.addDate || "");
-    const formattedDesc = formatCell(bookmark.description || "");
-    const lastCheck = "";
-    const status = "";
-    return `| ${formattedTitle} | ${formattedUrl} | ${formattedTags} | ${formattedDate} | ${formattedDesc} | ${lastCheck} | ${status} |
-`;
   }
   parseBookmarks(element) {
     const bookmarks = [];
@@ -815,27 +854,14 @@ ${BOOKMARK_TABLE_HEADERS.header}`;
     traverse(element);
     return bookmarks;
   }
-};
-var BrowserFavoritesSettingTab = class extends import_obsidian.PluginSettingTab {
-  constructor(app, plugin) {
-    super(app, plugin);
-    this.plugin = plugin;
+  // Hilfsmethoden als Klassenmethoden
+  deduplicateBookmarkArray(bookmarks) {
+    return deduplicateBookmarkArray(bookmarks);
   }
-  display() {
-    const { containerEl } = this;
-    containerEl.empty();
-    containerEl.createEl("h2", { text: "Browser Favorites Settings" });
-    new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Where to store the imported bookmarks").addText((text) => text.setPlaceholder("Browser Favorites").setValue(this.plugin.settings.outputFolderPath).onChange(async (value) => {
-      this.plugin.settings.outputFolderPath = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian.Setting(containerEl).setName("Check bookmark accessibility").setDesc("Periodically check if bookmarks are still accessible (may affect performance)").addToggle((toggle) => toggle.setValue(this.plugin.settings.checkAccessibility).onChange(async (value) => {
-      this.plugin.settings.checkAccessibility = value;
-      await this.plugin.saveSettings();
-    }));
-    containerEl.createEl("div", {
-      text: `Version: ${PLUGIN_VERSION}`,
-      cls: "browser-favorites-version-info"
-    });
+  formatBookmarkLine(bookmark) {
+    return formatBookmarkLine(bookmark);
+  }
+  categorize(title, url) {
+    return categorize(title, url);
   }
 };
