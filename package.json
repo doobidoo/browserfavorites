@@ -1,5 +1,5 @@
 {
-	"name": "browser-favorites",
+	"name": "browserfavorites",
 	"version": "3.1.9",
 	"description": "Browser Favorites Plugin for Obsidian",
 	"main": "main.js",

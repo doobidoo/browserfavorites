@@ -21,3 +21,4 @@ data.json
 .DS_Store
 .aider*
 aider-env/
+package-lock.json
