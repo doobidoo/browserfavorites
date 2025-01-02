@@ -1,10 +1,10 @@
 {
+	"author": "Heinrich Krupp",
+	"authorUrl": "https://github.com/doobidoo",
 	"id": "browser-favorites",
 	"name": "Browser Favorites",
-	"version": "3.1.9",
-	"minAppVersion": "0.15.0",
 	"description": "Import browser bookmarks into your vault",
-	"author": "Heinrich Krupp",
 	"authorUrl": "https://github.com/yourusername",
-	"isDesktopOnly": false
+	"isDesktopOnly": true
+	"version": "1.0.0",
 }
