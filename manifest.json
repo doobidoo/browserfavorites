@@ -6,6 +6,5 @@
 	"description": "Import browser bookmarks into your vault.",
 	"author": "Heinrich Krupp",
 	"authorUrl": "https://github.com/doobidoo",
-	"fundingUrl": "https://obsidian.md/pricing",
 	"isDesktopOnly": true
 }
