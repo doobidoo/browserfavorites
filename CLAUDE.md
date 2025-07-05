@@ -49,3 +49,23 @@ This is an Obsidian plugin that imports browser bookmarks and manages them as st
 - TypeScript compilation with strict null checks
 - External dependencies: obsidian, electron, codemirror modules
 - Production builds exclude sourcemaps and enable tree shaking
+
+## Plugin Submission Status
+
+**Status**: ✅ **SUBMITTED TO OBSIDIAN COMMUNITY**
+- **Submission Date**: January 7, 2025
+- **Pull Request**: https://github.com/obsidianmd/obsidian-releases/pull/7003
+- **Plugin ID**: `browserfavorites`
+- **Current Version**: 3.1.10
+
+### Submission Details
+- Plugin entry added to community-plugins.json
+- All requirements met (manifest.json, main.js, styles.css, README.md)
+- GitHub release v3.1.10 available with required files
+- Comprehensive documentation and features implemented
+- Awaiting review from Obsidian team
+
+### Post-Approval Actions Needed
+- Monitor PR for feedback and respond promptly
+- Once merged, plugin will be available in Community Plugins within 24-48 hours
+- Consider announcing in Obsidian forums and Discord #updates channel
