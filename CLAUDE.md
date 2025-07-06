@@ -69,3 +69,35 @@ This is an Obsidian plugin that imports browser bookmarks and manages them as st
 - Monitor PR for feedback and respond promptly
 - Once merged, plugin will be available in Community Plugins within 24-48 hours
 - Consider announcing in Obsidian forums and Discord #updates channel
+
+## Obsidian Plugin Submission Guidelines
+
+### Critical Requirements for PR Template
+**MUST follow the EXACT template** from `.github/PULL_REQUEST_TEMPLATE/plugin.md`:
+- Header MUST be: `# I am submitting a new Community Plugin`
+- Use exact checkbox formatting and section headers
+- Bot validation is very strict about template compliance
+
+### Release Tag Requirements
+- GitHub release tag MUST match manifest.json version EXACTLY
+- **NO `v` prefix**: Use `3.1.10`, NOT `v3.1.10`
+- Release must contain individual files (not just source.zip):
+  - `main.js` (required)
+  - `manifest.json` (required) 
+  - `styles.css` (optional but recommended)
+
+### Common Validation Failures
+1. **Wrong PR template format** - Bot expects exact header/checkbox format
+2. **Incorrect release tag** - Must be exact version without `v` prefix
+3. **Missing files in release** - Files must be individual assets, not just in source archives
+4. **ID mismatch** - Plugin ID in manifest.json must match community-plugins.json entry
+
+### Validation Process
+- GitHub Actions automatically validates on PR updates
+- Usually takes 1-5 minutes to complete
+- Validation reruns automatically when PR is updated
+- Look for green checkmark and "Ready for review" label
+
+### Template Location
+- Official template: `https://github.com/obsidianmd/obsidian-releases/blob/master/.github/PULL_REQUEST_TEMPLATE/plugin.md`
+- Must copy exact formatting including comments and checkboxes
