@@ -101,3 +101,17 @@ This is an Obsidian plugin that imports browser bookmarks and manages them as st
 ### Template Location
 - Official template: `https://github.com/obsidianmd/obsidian-releases/blob/master/.github/PULL_REQUEST_TEMPLATE/plugin.md`
 - Must copy exact formatting including comments and checkboxes
+
+## Security Updates
+
+### Fixed Vulnerabilities (January 7, 2025)
+- **esbuild CORS vulnerability** (GHSA-67mh-4wv8-2f99): Updated from 0.17.3 to 0.25.5
+  - Medium severity: Development server CORS misconfiguration allowed arbitrary requests
+  - Fixed by updating to esbuild 0.25.0+ which properly configures CORS headers
+- **brace-expansion ReDoS**: Fixed regex denial of service vulnerability
+- All npm audit issues resolved (0 vulnerabilities remaining)
+
+### Security Maintenance
+- Run `npm audit` regularly to check for new vulnerabilities
+- Update dependencies promptly when security fixes are available
+- Monitor GitHub Dependabot alerts and resolve them quickly
