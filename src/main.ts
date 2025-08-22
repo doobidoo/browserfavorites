@@ -207,7 +207,7 @@ export default class BrowserFavoritesPlugin extends Plugin {
     
             const updatedContent = modifiedLines.join('\n');
             if (updatedContent !== content) {
-                await this.app.vault.modify(file, updatedContent);
+                await this.app.vault.process(file, (data) => updatedContent);
             }
         }
     
@@ -511,7 +511,7 @@ export default class BrowserFavoritesPlugin extends Plugin {
                 if (this.abortController?.signal.aborted) {
                     break;
                 }
-                await this.app.vault.modify(file, newContent.join('\n'));
+                await this.app.vault.process(file, (data) => newContent.join('\n'));
             }
 
             progressNotice.hide();
@@ -655,7 +655,7 @@ export default class BrowserFavoritesPlugin extends Plugin {
         }
     
         if (file instanceof TFile) {
-            await this.app.vault.modify(file, content);
+            await this.app.vault.process(file, (data) => content);
         } else {
             await this.app.vault.create(fileName, content);
         }
